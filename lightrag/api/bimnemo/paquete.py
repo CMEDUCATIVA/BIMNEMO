@@ -213,12 +213,16 @@ def python_del_entorno(raiz: Path) -> str:
     """
     import sys
 
-    candidato = raiz / ".venv" / "Scripts" / "python.exe"
-    if candidato.is_file():
-        return str(candidato)
-    candidato = raiz / ".venv" / "bin" / "python"
-    if candidato.is_file():
-        return str(candidato)
+    # El instalador trae un Python portable en `python/`; una copia clonada
+    # para desarrollar, un entorno virtual. Se mira el portable primero porque
+    # es el caso del cliente, que es quien usa esto.
+    for candidato in (
+        raiz / "python" / "python.exe",
+        raiz / ".venv" / "Scripts" / "python.exe",
+        raiz / ".venv" / "bin" / "python",
+    ):
+        if candidato.is_file():
+            return str(candidato)
     return sys.executable
 
 

@@ -330,10 +330,106 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def asegurar_env() -> None:
+    """Crea el `.env` del ejemplo si no hay ninguno.
+
+    Sin `.env`, LightRAG **pregunta por la consola** antes de arrancar
+    (``utils_api.py``):
+
+        response = input("Do you want to continue? (yes/NO): ")
+
+    En una aplicación de escritorio esa pregunta no tiene quién la conteste:
+    el motor revienta con ``EOFError`` y se cierra, y el lanzador se queda
+    esperando hasta agotar su plazo. Desde fuera es «se queda arrancando».
+
+    Le pasa a **toda instalación nueva**, porque el `.env` no viaja en el
+    instalador —lleva las claves de quien empaqueta— así que es el primer
+    arranque de todos los clientes.
+
+    El fichero copiado no trae clave de API: el motor levanta y el panel se
+    ve, pero indexar fallará hasta configurar un proveedor. Eso ya lo explica
+    la pantalla de Configuración, y es mucho mejor que no arrancar.
+    """
+    raiz = _repo_root()
+    env = raiz / ".env"
+    if env.exists():
+        return
+
+    ejemplo = raiz / "env.example"
+    try:
+        if ejemplo.is_file():
+            shutil.copyfile(ejemplo, env)
+            print(
+                "Primer arranque: se ha creado el fichero .env a partir de "
+                "env.example. Configura tu proveedor de IA desde la pantalla "
+                "de Configuración."
+            )
+        else:
+            # Sin ejemplo del que partir, basta con que exista: lo único que
+            # hay que evitar es la pregunta por consola.
+            env.write_text(
+                "# Creado por BIMNEMO en el primer arranque.\n"
+                "HOST=127.0.0.1\n"
+                "PORT=9621\n",
+                encoding="utf-8",
+            )
+    except OSError as exc:
+        # No poder escribirlo no debe impedir el arranque: el motor seguirá
+        # avisando, y con consola se verá por qué.
+        print(f"No se pudo crear el .env: {exc}", file=sys.stderr)
+
+
+#: Nombre del mutex por el que el instalador reconoce que BIMNEMO está abierto.
+#:
+#: Tiene que coincidir **exactamente** con el que busca `installer\\BIMNEMO.iss`
+#: (`AppMutex` y `CheckForMutexes`). Si cambia aquí, cambia allí.
+MUTEX_EN_MARCHA = "BIMNEMO_EN_MARCHA"
+
+#: El asa del mutex, viva mientras viva el proceso.
+#:
+#: Windows suelta un mutex cuando se cierra su última asa, así que **hay que
+#: guardarla**: una variable local la recogería el recolector de basura y el
+#: instalador dejaría de ver la aplicación a los pocos segundos de arrancar.
+_asa_mutex: object | None = None
+
+
+def marcar_en_marcha() -> None:
+    """Publica una señal de «BIMNEMO está abierto» que el instalador ve.
+
+    Instalar encima de una aplicación en marcha rompe la instalación a medias:
+    Windows no deja sobrescribir un fichero en uso, así que `python.exe` y sus
+    DLL se quedan con la versión vieja mientras el resto se actualiza.
+
+    El instalador ya comprobaba este mutex, pero **nadie lo creaba**, así que
+    la comprobación preguntaba por una señal que ningún proceso emitía y jamás
+    saltaba. Esto es lo que faltaba.
+
+    Se crea en el lanzador y no en el motor a propósito: el motor muere y
+    renace en cada reinicio, y el mutex se apagaría durante esos segundos.
+    """
+    global _asa_mutex
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.restype = ctypes.c_void_p
+        asa = kernel32.CreateMutexW(None, False, MUTEX_EN_MARCHA)
+        if asa:
+            _asa_mutex = ctypes.c_void_p(asa)
+    except (OSError, AttributeError) as exc:
+        # Sin mutex la aplicación funciona igual; solo pierde el aviso del
+        # instalador. No es motivo para no arrancar.
+        print(f"No se pudo señalar que BIMNEMO está abierto: {exc}", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     base_url = f"http://{args.host}:{args.port}"
     app_url = f"{base_url}{UI_PATH}"
+
+    marcar_en_marcha()
 
     already_running = port_is_open(args.host, args.port) and health_responds(base_url)
     server: subprocess.Popen | None = None
@@ -350,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     else:
+        asegurar_env()
         print(f"Arrancando el motor en {base_url} …")
         server = start_server(args.host, args.port, quiet=not args.consola)
         if not wait_for_server(base_url, server, SERVER_TIMEOUT_SECONDS):

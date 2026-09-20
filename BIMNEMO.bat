@@ -21,11 +21,17 @@ REM muere con UnicodeEncodeError antes de escuchar.
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
-if not exist "%RAIZ%.venv\Scripts\python.exe" (
+REM Dos formas de estar instalado, y hay que soportar las dos:
+REM   * con el instalador  -> Python portable en python\
+REM   * clonado para desarrollar -> entorno virtual en .venv\
+set "PY=%RAIZ%python\python.exe"
+if not exist "%PY%" set "PY=%RAIZ%.venv\Scripts\python.exe"
+
+if not exist "%PY%" (
     echo.
-    echo  [ERROR] No se encuentra el entorno virtual en .venv
+    echo  [ERROR] No se encuentra el interprete, ni en python\ ni en .venv\
     echo.
-    echo  Crealo una sola vez con:
+    echo  Si clonaste el repositorio, crea el entorno una sola vez con:
     echo      python -m venv .venv
     echo      .venv\Scripts\python.exe -m pip install -e .[api]
     echo.
@@ -41,7 +47,7 @@ if not exist "%RAIZ%.env" (
     echo.
 )
 
-"%RAIZ%.venv\Scripts\python.exe" -m lightrag.api.bimnemo.desktop %*
+"%PY%" -m lightrag.api.bimnemo.desktop %*
 
 if errorlevel 1 (
     echo.

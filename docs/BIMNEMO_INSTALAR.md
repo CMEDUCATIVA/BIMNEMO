@@ -11,12 +11,13 @@ tu máquina.
 | | |
 |---|---|
 | Windows | 10 u 11, de 64 bits |
-| Espacio en disco | **1 GB** (el programa ocupa 300 MB; el resto es para tus documentos y memorias) |
+| Espacio en disco | **1 GB** (el programa ocupa unos 360 MB; el resto es para tus documentos y memorias) |
 | Internet | Solo para instalar, para actualizar y para el modelo de IA |
 | Una clave de API | De OpenAI, Google u otro proveedor. Es lo único que tiene coste |
 
-**No hace falta instalar Python ni nada más.** El instalador lo lleva todo
-dentro.
+**No hace falta instalar Python ni nada más.** El instalador lleva su propio
+intérprete y las 127 dependencias dentro, así que no toca nada de lo que ya
+tengas en el ordenador.
 
 ---
 
