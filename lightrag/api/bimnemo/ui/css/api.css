@@ -227,6 +227,16 @@
   margin-right: 0.625rem;
   flex: none;
   white-space: nowrap;
+
+  /* Misma altura que la tira de solapas de al lado.
+     La cabecera alinea por abajo, así que compartían el borde inferior pero el
+     botón medía 32 px contra 40 y le sobraban ocho arriba: dos cajas del mismo
+     par con alturas distintas se leen como un descuadre.
+     La cuenta es la de `.solapas`: la solapa (2rem) más su relleno
+     (0.1875rem × 2) más su filo (1px × 2). Escrita así para que si una cambia,
+     se vea que la otra depende de ella. */
+  height: calc(2rem + 0.375rem + 2px);
+  font-size: var(--text-sm);
 }
 
 .copiar-ia[hidden] { display: none; }
