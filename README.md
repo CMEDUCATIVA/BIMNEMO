@@ -12,6 +12,21 @@
 > | Cómo publicar una versión | [`docs/BIMNEMO_PUBLICAR.md`](docs/BIMNEMO_PUBLICAR.md) |
 > | Arrancar | `BIMNEMO.bat` (o `BIMNEMO.bat --consola` para ver el registro) |
 >
+> **Instalar desde cero:**
+>
+> ```bash
+> git clone https://github.com/CMEDUCATIVA/BIMNEMO.git
+> cd BIMNEMO
+> pip install -e .[api]
+> cp env.example .env      # pon tu clave de OpenAI (u otro proveedor)
+> BIMNEMO.bat
+> ```
+>
+> Para que el grafo salga en español, copia
+> `prompts/samples/entity_type_prompt.es.sample.yml` a
+> `prompts/entity_type/entity_type_prompt.yml` y añade `SUMMARY_LANGUAGE=Spanish`
+> al `.env`.
+>
 > Debajo sigue el README original de LightRAG, que es el motor.
 
 ---
