@@ -82,6 +82,18 @@ Name: "escritorio"; Description: "Crear un acceso directo en el escritorio"; \
 ; Todo lo que prepara el guion de construcción: el programa y su `.venv`.
 Source: "salida\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; El `.venv` de las versiones hasta la 1.2.0. Desde la 1.2.1 el paquete lleva
+; un Python portable en `python\` y ese `.venv` no se usa para nada, pero el
+; desinstalador anterior no se lo lleva entero: solo borra lo que él instaló,
+; y los `__pycache__` que aparecieron al funcionar se quedan. Son megas
+; muertos y, peor, un segundo intérprete a medias que confunde a cualquiera
+; que abra la carpeta.
+;
+; El `Check` es por si alguien apunta el instalador a una copia de desarrollo:
+; allí el `.venv` sí es el bueno y no se toca.
+Type: filesandordirs; Name: "{app}\.venv"; Check: not EsCopiaDeDesarrollo
+
 [Icons]
 ; Sin `IconFilename`: los accesos directos toman el icono de `pythonw.exe`.
 ; Feo, pero honesto — BIMNEMO todavía no tiene icono propio. Cuando lo tenga,
@@ -167,26 +179,91 @@ end;
 var
   RutaPrevia: String;
 
+// Una copia clonada para desarrollar, no una instalación. Se reconoce por el
+// `.git`, y ahí el instalador no debe borrar nada que no haya puesto él.
+function EsCopiaDeDesarrollo(): Boolean;
+begin
+  Result := DirExists(ExpandConstant('{app}\.git'));
+end;
+
+function CarpetaPorDefecto(): String;
+begin
+  Result := ExpandConstant('{localappdata}\BIMNEMO');
+end;
+
 function DirPropuesto(Valor: String): String;
 begin
   if RutaPrevia <> '' then
     Result := RutaPrevia
   else
-    Result := ExpandConstant('{localappdata}\BIMNEMO');
+    Result := CarpetaPorDefecto();
+end;
+
+// Una instalación puede existir SIN constar en el registro: alguien limpia el
+// registro, se copia el perfil de un usuario a otro, o —como pasó aquí— otra
+// instalación con el mismo AppId se desinstala después y se lleva la entrada
+// por delante. La carpeta se queda entera y el detector no veía nada.
+//
+// Así que el registro es una pista, no la única. Se mira también el disco.
+function HayInstalacionEn(carpeta: String): Boolean;
+begin
+  Result := (carpeta <> '') and
+            (FileExists(AddBackslash(carpeta) + 'unins000.exe') or
+             FileExists(AddBackslash(carpeta) + 'VERSION'));
+end;
+
+function VersionEnCarpeta(carpeta: String): String;
+var
+  contenido: AnsiString;
+begin
+  Result := '';
+  if carpeta = '' then
+    Exit;
+  if LoadStringFromFile(AddBackslash(carpeta) + 'VERSION', contenido) then
+    Result := Trim(String(contenido));
 end;
 
 function QuitarAnterior(): Boolean;
 var
-  desinstalador, previa, mensaje: String;
+  desinstalador, previa, mensaje, carpeta: String;
   respuesta, codigo, espera: Integer;
 begin
   Result := True;
-  desinstalador := DesinstaladorPrevio();
-  if desinstalador = '' then
-    Exit;
 
-  RutaPrevia := LeerPrevio('Inno Setup: App Path');
+  desinstalador := DesinstaladorPrevio();
+  carpeta := LeerPrevio('Inno Setup: App Path');
+
+  // Sin entrada en el registro, preguntarle al disco por la carpeta donde
+  // BIMNEMO se instala siempre.
+  if desinstalador = '' then
+  begin
+    carpeta := CarpetaPorDefecto();
+    if not HayInstalacionEn(carpeta) then
+      Exit;
+    if FileExists(AddBackslash(carpeta) + 'unins000.exe') then
+      desinstalador := AddBackslash(carpeta) + 'unins000.exe';
+  end;
+
+  RutaPrevia := carpeta;
+
   previa := VersionPrevia();
+  if previa = '' then
+    previa := VersionEnCarpeta(carpeta);
+
+  // Hay una instalación pero no queda desinstalador con el que quitarla. No
+  // se borra nada a mano: avisar y dejar que decida.
+  if desinstalador = '' then
+  begin
+    SuppressibleMsgBox(
+      'En ' + carpeta + ' ya hay un BIMNEMO, pero no encuentro su ' +
+      'desinstalador.' + #13#10#13#10 +
+      'Se instalará encima. Tus documentos, tus memorias y tu configuración ' +
+      'no se tocan, pero pueden quedar ficheros sueltos de la versión ' +
+      'anterior.',
+      mbInformation, MB_OK, IDOK);
+    Exit;
+  end;
+
   if previa <> '' then
     mensaje := 'Ya tienes BIMNEMO ' + previa + ' instalado.'
   else
@@ -230,17 +307,19 @@ begin
   // Esperar al proceso NO basta. El desinstalador de Inno se copia al
   // temporal, lanza esa copia y **el original sale de inmediato**: el `Exec`
   // de arriba vuelve con la desinstalación aún corriendo, y empezaríamos a
-  // copiar ficheros nuevos mientras la copia vieja los va borrando. Así que
-  // se espera a la señal de que terminó de verdad: que la entrada del
-  // registro haya desaparecido.
+  // copiar ficheros nuevos mientras la copia vieja los va borrando.
+  //
+  // Se espera a que `unins000.exe` desaparezca, que es lo último que hace al
+  // terminar. Se mira el fichero y no el registro porque cuando la
+  // instalación se encontró por la carpeta no hay entrada que vigilar.
   espera := 0;
-  while (espera < 120) and (DesinstaladorPrevio() <> '') do
+  while (espera < 120) and FileExists(desinstalador) do
   begin
     Sleep(500);
     espera := espera + 1;
   end;
 
-  if DesinstaladorPrevio() <> '' then
+  if FileExists(desinstalador) then
     MsgBox('La desinstalación anterior está tardando más de lo normal. Se ' +
            'continuará, pero si algo queda raro, desinstala a mano y vuelve ' +
            'a instalar.', mbInformation, MB_OK);
@@ -268,4 +347,30 @@ begin
   end;
 
   Result := QuitarAnterior();
+end;
+
+// La detección de arriba mira el registro y la carpeta donde BIMNEMO se
+// instala siempre. Si en la pantalla de destino se elige otra a mano, y ahí
+// ya hay un BIMNEMO, nadie lo habría mirado. Aquí se cierra ese hueco.
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID <> wpSelectDir then
+    Exit;
+  if not HayInstalacionEn(WizardDirValue) then
+    Exit;
+  // Si es la misma por la que ya se preguntó, no repetir.
+  if CompareText(RemoveBackslash(WizardDirValue),
+                 RemoveBackslash(RutaPrevia)) = 0 then
+    Exit;
+
+  Result := SuppressibleMsgBox(
+    'En esa carpeta ya hay un BIMNEMO instalado.' + #13#10#13#10 +
+    'Si continúas se instalará encima y pueden quedar mezclados ficheros de ' +
+    'las dos versiones. Tus documentos, tus memorias y tu configuración no ' +
+    'se tocan.' + #13#10#13#10 +
+    'Lo más limpio es desinstalar el anterior y volver a empezar.' + #13#10 +
+    '' + #13#10 +
+    '¿Continuar de todas formas?',
+    mbConfirmation, MB_YESNO, IDYES) = IDYES;
 end;
