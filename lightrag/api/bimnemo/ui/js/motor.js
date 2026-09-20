@@ -157,7 +157,11 @@ export async function renderMotor() {
       'Identidad',
       'zap',
       `<dl class="deflist">
-        ${row('Producto', `${engine.product.name} ${engine.product.version}`)}
+        ${row(
+          'Producto',
+          `${engine.product.name} ${engine.product.version}` +
+            (engine.product.build ? ` · ${engine.product.build}` : '')
+        )}
         ${row('Motor', `${engine.product.engine} ${engine.product.engine_version}`)}
         ${row('Espacio de trabajo', engine.workspace || '(por defecto)')}
         ${monoRow('Directorio de datos', engine.working_dir)}

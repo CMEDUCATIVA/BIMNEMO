@@ -106,6 +106,11 @@ def create_bimnemo_engine_routes(
                 "version": BIMNEMO_VERSION,
                 "engine": "LightRAG",
                 "engine_version": _engine_version(),
+                # El commit exacto que se está ejecutando. «1.0.0» no basta
+                # para saber qué build tienes: entre una versión y la
+                # siguiente hay commits, y al pedir ayuda lo primero que hace
+                # falta es saber cuál.
+                "build": _commit_corto(),
             },
             storages={
                 "kv": getattr(target_rag, "kv_storage", "?"),
@@ -181,6 +186,21 @@ def create_bimnemo_engine_routes(
 
 
 # de datos, secreto de sesión…).
+def _commit_corto() -> str:
+    """Los siete primeros caracteres del commit instalado, o cadena vacía.
+
+    Vacía si BIMNEMO no se instaló desde git: mejor no enseñar nada que
+    enseñar un «desconocido» que no ayuda a nadie.
+    """
+    from lightrag.api.bimnemo.actualizacion import commit_instalado
+
+    try:
+        commit = commit_instalado()
+    except Exception:  # noqa: BLE001 — saber el commit nunca puede romper la vista
+        return ""
+    return commit[:7] if commit else ""
+
+
 def _engine_version() -> str:
     """Versión del motor, sin romper si el paquete no la expone."""
     try:
