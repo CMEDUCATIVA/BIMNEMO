@@ -198,6 +198,19 @@ _register(
     "ini",
     "toml",
     "cfg",
+    # Estas nueve se podían SUBIR pero no tenían categoría, así que caían en
+    # «Otros» — que además no cuenta para el «N / 8» del panel. Un formato que
+    # la zona de arrastre anuncia y el panel luego no sabe clasificar es una
+    # contradicción dentro de la misma pantalla.
+    "bat",
+    "conf",
+    "hpp",
+    "less",
+    "mdx",
+    "properties",
+    "scss",
+    "swift",
+    "textpack",
 )
 
 
