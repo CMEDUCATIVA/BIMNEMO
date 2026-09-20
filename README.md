@@ -1,3 +1,21 @@
+> # BIMNEMO
+>
+> **Memoria de conocimiento local, construida sobre LightRAG.**
+>
+> Este repositorio es LightRAG con BIMNEMO encima: memorias aisladas, interfaz
+> en español, grafo navegable y una API pensada para que otras IA se conecten
+> a tu conocimiento. Todo corre en tu ordenador; tus documentos no salen de él.
+>
+> | | |
+> |---|---|
+> | Cómo actualizar | [`como_actualizar.md`](como_actualizar.md) |
+> | Cómo publicar una versión | [`docs/BIMNEMO_PUBLICAR.md`](docs/BIMNEMO_PUBLICAR.md) |
+> | Arrancar | `BIMNEMO.bat` (o `BIMNEMO.bat --consola` para ver el registro) |
+>
+> Debajo sigue el README original de LightRAG, que es el motor.
+
+---
+
 <div align="center">
 
 <div style="margin: 20px 0;">
