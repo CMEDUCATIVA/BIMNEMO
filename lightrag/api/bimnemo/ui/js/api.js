@@ -265,7 +265,21 @@ export async function waitForEngine(
     }
 
     if (actual !== null) {
-      if (seCayo && (anterior === null || actual !== anterior)) return true;
+      // Un `boot_id` distinto YA demuestra que es otro proceso. No hace falta
+      // haber presenciado la caída.
+      //
+      // Exigirlo era un fallo: el motor está caído unos cuatro segundos y se
+      // sondea cada 0,7 s, así que casi siempre se pilla — pero cuando no, la
+      // espera se quedaba colgada hasta agotar el tiempo y decía «el motor no
+      // volvió» con el motor perfectamente en pie y actualizado. Pasó en una
+      // actualización que duró seis segundos y salió bien.
+      if (anterior !== null && actual !== anterior) return true;
+
+      // Sin referencia previa no hay con qué comparar, así que lo único
+      // exigible es haber visto caer el proceso: la primera respuesta después
+      // de eso es de uno nuevo.
+      if (anterior === null && seCayo) return true;
+
       anunciar(seCayo ? 'comprobando' : 'cerrando');
     }
 
