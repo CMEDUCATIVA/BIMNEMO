@@ -65,6 +65,15 @@
   height: 100%;
 }
 
+/* Y sus hijos necesitan `min-width: 0`.
+   Un hijo de flex no baja de su contenido por defecto (`min-width: auto`), así
+   que una ruta larga o una descripción de endpoint ensanchaban la columna
+   entera y TODAS las fichas se salían por la derecha. A 1280 px eran 132
+   píxeles de desborde. */
+#view-api.is-active > * {
+  min-width: 0;
+}
+
 .doc-marco[hidden] { display: none; }
 
 .doc {
@@ -204,4 +213,25 @@
 .endpoint:hover .endpoint__copiar,
 .endpoint__copiar:focus-visible {
   opacity: 1;
+}
+
+/* --------------------------------------------------------------------------
+   «Copiar para la IA»
+   Es la acción principal de esta pestaña, así que va arriba y en primario.
+   Antes el mismo contenido estaba en una ficha al final del desplazamiento:
+   existía y había que buscarlo.
+   -------------------------------------------------------------------------- */
+
+.copiar-ia {
+  margin-left: auto;
+  margin-right: 0.625rem;
+  flex: none;
+  white-space: nowrap;
+}
+
+.copiar-ia[hidden] { display: none; }
+
+/* En pantallas estrechas el rótulo estorba; el icono y el título bastan. */
+@media (max-width: 760px) {
+  .copiar-ia span { display: none; }
 }

@@ -7,6 +7,13 @@
 .stack { display: grid; gap: 1rem; }
 .stack--tight { gap: 0.75rem; }
 
+/* Un hijo de rejilla no baja de su contenido por defecto (`min-width: auto`),
+   así que una tarjeta con una línea larga que no parte —un bloque de código,
+   por ejemplo— ensancha la columna y **todas** las demás se salen con ella.
+   Pasó con la instrucción para un agente: imponía 1148 px de mínimo y la
+   vista API desbordaba 132 a 1280 de ancho. */
+.stack > * { min-width: 0; }
+
 .row {
   display: flex;
   align-items: center;
@@ -464,7 +471,11 @@
 
 .endpoint {
   display: grid;
-  grid-template-columns: 3.75rem minmax(10rem, auto) 1fr;
+  /* Cuatro columnas: método, ruta, para qué sirve, y el botón de copiar.
+     Con tres, el botón caía en una columna implícita que se dimensionaba a su
+     contenido y ensanchaba la fila entera: la vista API desbordaba 132 px a
+     1280 de ancho. */
+  grid-template-columns: 3.75rem minmax(8rem, auto) 1fr auto;
   align-items: center;
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
@@ -491,6 +502,10 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--content-primary);
+  /* Las rutas llevan ahora la memoria dentro —`/nemo/Obra_Sur/…`— y pueden
+     ser largas. Que partan antes que empujar la columna. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .endpoint__purpose {

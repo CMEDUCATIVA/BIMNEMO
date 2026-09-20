@@ -382,6 +382,13 @@ export async function renderApi() {
 
   wireAccess(authenticated);
   wireCopy(body);
+  wireCopiarIA(
+    instruccionParaAgente(url, manifest, authenticated, claveEjemplo(), {
+      id: nemoId,
+      nombre: nemoNombre,
+    }),
+    nemoNombre
+  );
   if (!solapasPuestas) {
     wireSolapas();
     solapasPuestas = true;
@@ -437,6 +444,27 @@ function wireAccess(authenticated) {
     }
     boton.disabled = false;
   });
+}
+
+/**
+ * El botón de arriba, que copia todo lo que una IA necesita.
+ *
+ * Recibe el texto ya generado —el mismo que enseña la ficha de abajo— en vez
+ * de volver a construirlo: dos textos que deberían ser iguales acaban
+ * discrepando, y el que se pega en una skill y se olvida es justo el que
+ * nadie revisaría.
+ */
+function wireCopiarIA(texto, nemoNombre) {
+  const boton = document.getElementById('btn-copiar-ia');
+  if (!boton) return;
+
+  boton.hidden = false;
+  boton.innerHTML = `${icon('copy', 13)} <span>Copiar para la IA</span>`;
+  // El botón por sí solo no dice de qué memoria habla, y lo que copia cambia
+  // con ella.
+  boton.title = `Todo lo que una IA necesita para usar «${nemoNombre}»: la dirección, los endpoints y cómo llamarlos`;
+
+  boton.onclick = () => copiar(texto, boton);
 }
 
 /** Las solapas: Guía, Swagger y ReDoc. */
