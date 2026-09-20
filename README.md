@@ -6,11 +6,18 @@
 > en español, grafo navegable y una API pensada para que otras IA se conecten
 > a tu conocimiento. Todo corre en tu ordenador; tus documentos no salen de él.
 >
-> | | |
+> | Quiero… | Documento |
 > |---|---|
-> | Cómo actualizar | [`como_actualizar.md`](como_actualizar.md) |
-> | Cómo publicar una versión | [`docs/BIMNEMO_PUBLICAR.md`](docs/BIMNEMO_PUBLICAR.md) |
-> | Arrancar | `BIMNEMO.bat` (o `BIMNEMO.bat --consola` para ver el registro) |
+> | **Instalarlo y empezar** | [`docs/BIMNEMO_INSTALAR.md`](docs/BIMNEMO_INSTALAR.md) |
+> | **Actualizarlo** | [`como_actualizar.md`](como_actualizar.md) |
+> | Entender cómo está hecho | [`docs/BIMNEMO_ARQUITECTURA.md`](docs/BIMNEMO_ARQUITECTURA.md) |
+> | Publicar una versión | [`docs/BIMNEMO_PUBLICAR.md`](docs/BIMNEMO_PUBLICAR.md) |
+>
+> **Descarga el instalador de Windows** en
+> [Releases](https://github.com/CMEDUCATIVA/BIMNEMO/releases). No hace falta
+> instalar Python: va todo dentro.
+>
+> Arrancar desde el código: `BIMNEMO.bat` (o `--consola` para ver el registro).
 >
 > **Instalar desde cero:**
 >

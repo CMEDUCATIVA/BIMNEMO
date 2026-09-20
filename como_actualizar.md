@@ -1,96 +1,66 @@
 # Cómo actualizar BIMNEMO
 
-BIMNEMO se actualiza desde GitHub, sin reinstalar nada y sin tocar tus
-memorias. Este documento cuenta las dos formas de hacerlo —desde la ventana y
-desde la terminal—, qué ocurre por debajo y qué hacer si algo sale mal.
-
-**Repositorio:** <https://github.com/CMEDUCATIVA/BIMNEMO>
+BIMNEMO se actualiza solo desde un botón, **sin reinstalar nada y sin tocar tu
+trabajo**.
 
 ---
 
-## Lo primero, porque es lo que más preocupa
+## Lo primero, porque es lo que preocupa
 
 > **Actualizar no toca tus datos.**
 
-Tus documentos (`inputs/`), tus memorias indexadas (`rag_storage/`) y tu
-configuración (`.env`) **no están en GitHub** y la actualización no los
-modifica. Están excluidos a propósito en `.gitignore`: lo que viaja es el
-programa, no tu conocimiento.
+Tus documentos, tus memorias y tu configuración —incluidas tus claves— no
+viajan a ninguna parte y la actualización no los modifica. Lo que se descarga
+es el programa, no tu conocimiento.
 
-Eso también significa que **actualizar no es una copia de seguridad**. Si
-quieres una, copia esas tres cosas a otro sitio.
+Eso también quiere decir que **actualizar no es una copia de seguridad**. Si
+quieres una, copia estas tres carpetas a otro sitio:
 
----
-
-## Forma 1 — desde la ventana (la normal)
-
-En la barra superior, a la derecha, hay un botón de estado:
-
-| Lo que ves | Qué significa |
+| Qué | Dónde |
 |---|---|
-| **Actualizado** | Tienes la última versión publicada |
-| **Actualizar** *(parpadeando)* | Hay una versión nueva esperando |
-| **Buscando…** | Está preguntando a GitHub |
-| **Sin conexión** | No se pudo preguntar; se reintenta solo |
-
-Pulsa **Actualizar** y BIMNEMO hace lo siguiente, en este orden:
-
-1. **Comprueba que no hay nada a medias.** Si está indexando, se niega y te lo
-   dice: cortar una ingesta deja documentos a medio procesar.
-2. **Descarga los cambios** (`git fetch` + `git reset --hard` al commit
-   publicado). Esto **descarta modificaciones locales** en los ficheros del
-   programa; tus datos no se tocan.
-3. **Actualiza las dependencias** si cambiaron (`pip install -e .[api]`).
-4. **Reinicia el motor**, con la cortina de progreso de siempre.
-5. **Recarga la ventana** cuando el motor nuevo está en pie.
-
-Tarda entre quince segundos y un par de minutos, según si hay dependencias
-nuevas.
-
-### Si has cambiado código a mano
-
-El paso 2 **borra esos cambios**. BIMNEMO lo avisa antes de empezar si detecta
-modificaciones locales, y te deja elegir entre guardarlas (`git stash`) o
-descartarlas. Si trabajas sobre el código, usa la forma 2.
+| Tu configuración y tus claves | `.env` |
+| Tus documentos | `inputs\` |
+| Tus memorias indexadas | `rag_storage\` |
 
 ---
 
-## Forma 2 — desde la terminal (si tocas el código)
+## El botón
 
-```bash
-cd "C:/Users/Administrador/Downloads/MEMORIA/LightRAG-main/LightRAG-main"
+Arriba a la derecha, al lado de **Motor activo**:
 
-git stash            # guarda tus cambios locales, si los hay
-git pull origin main
-pip install -e .[api]
-git stash pop        # los recupera encima de la versión nueva
-```
+| Lo que ves | Qué significa | Qué hacer |
+|---|---|---|
+| **Actualizado** | Tienes la última versión | Nada |
+| **Actualizar** *(parpadeando)* | Hay una versión nueva | Púlsalo |
+| **Buscando…** | Está preguntando a GitHub | Esperar un momento |
+| **Sin conexión** | No se pudo preguntar | Nada; se reintenta solo |
 
-Después, reinicia el motor desde **Motor → Reiniciar motor LightRAG**, o
-cierra y abre `BIMNEMO.bat`.
+Al pulsarlo, BIMNEMO:
+
+1. **Comprueba que no hay nada a medias.** Si está indexando un documento, se
+   niega y te lo dice — cortar una indexación deja documentos incompletos.
+2. **Descarga la versión nueva.**
+3. **Reinicia el motor**, con una pantalla que va contando por dónde va.
+4. **Recarga la ventana** cuando está listo.
+
+Tarda entre diez segundos y un par de minutos. Normalmente unos ocho segundos.
+
+### Si el botón no aparece
+
+Significa que tu instalación no puede saber si hay versiones nuevas. Pasa si
+descargaste BIMNEMO como ZIP en vez de instalarlo. **Instálalo con el
+instalador** y el botón aparece.
 
 ---
 
 ## Cómo sabe que hay una versión nueva
 
-Cada cierto tiempo BIMNEMO le pregunta a GitHub por el último commit de la
-rama `main` y lo compara con el que tiene instalado. Si difieren, el botón
-empieza a parpadear.
+Cada media hora le pregunta a GitHub cuál es la última versión publicada y la
+compara con la tuya. Nada más: **no manda nada tuyo**, solo pregunta.
 
-- **Se consulta la API pública de GitHub**, sin credenciales. Eso basta para
-  un repositorio público y evita guardar un token en tu ordenador.
-- **El límite de GitHub sin credenciales son 60 consultas por hora.** BIMNEMO
-  pregunta **una vez al arrancar y luego cada 30 minutos**, así que ni se
-  acerca.
-- **Si no hay internet, no pasa nada.** El botón dice «Sin conexión» y se
-  vuelve a intentar más tarde. Nunca bloquea la aplicación.
-
----
-
-## Publicar una versión nueva (para quien mantiene BIMNEMO)
-
-Ver [`docs/BIMNEMO_PUBLICAR.md`](docs/BIMNEMO_PUBLICAR.md): cómo subir los
-cambios, cuándo poner una etiqueta y qué escribir en ella.
+- Si no hay internet, el botón dice «Sin conexión» y ya está. **La aplicación
+  funciona igual**; lo único que pierdes es el aviso.
+- No consume datos apreciables: es una pregunta de unos pocos kilobytes.
 
 ---
 
@@ -98,46 +68,58 @@ cambios, cuándo poner una etiqueta y qué escribir en ella.
 
 ### «El motor está indexando ahora mismo»
 
-No es un error: es una negativa a propósito. Espera a que termine la ingesta
-—la barra de la columna *Estado* en Archivos te dice por dónde va— y vuelve a
-pulsar.
+No es un error: es una negativa a propósito. Espera a que termine —la columna
+**Estado** de la pestaña Archivos te dice por dónde va— y vuelve a pulsar.
 
 ### El botón se queda en «Sin conexión»
 
-BIMNEMO no llega a `api.github.com`. Causas habituales: no hay internet, o un
-cortafuegos corporativo bloquea la salida. **No afecta a nada más**: la
-aplicación funciona igual, solo que no sabrá avisarte de versiones nuevas.
+BIMNEMO no llega a internet. Suele ser el cortafuegos de la empresa o una red
+sin salida. No afecta a nada más.
 
 ### La ventana no vuelve después de actualizar
 
-El motor no arrancó, casi siempre por una dependencia nueva que no se instaló
-bien. Ciérralo todo y arranca con consola para ver el error:
+Cierra BIMNEMO del todo y vuelve a abrirlo. Si sigue sin arrancar, ábrelo en
+modo diagnóstico para ver el error:
 
-```bash
+```
 BIMNEMO.bat --consola
 ```
 
-Y si hace falta, reinstala las dependencias a mano:
-
-```bash
-pip install -e .[api]
-```
+Con lo que salga ahí, quien te da soporte sabrá qué pasó. **Tus memorias no se
+pierden**: no dependen de la versión del programa.
 
 ### Quiero volver a la versión anterior
 
-```bash
-git log --oneline -10        # busca el commit al que quieres volver
-git reset --hard <commit>
-pip install -e .[api]
-```
-
-Tus memorias siguen intactas: no dependen de la versión del programa.
+Descarga el instalador de la versión que quieras de
+<https://github.com/CMEDUCATIVA/BIMNEMO/releases> y ejecútalo encima. Tus
+datos siguen donde están.
 
 ---
 
-## Lo que nunca hace una actualización
+## Lo que una actualización nunca hace
 
 - **No borra memorias** ni documentos.
-- **No cambia tu `.env`** — ni tus claves, ni tu proveedor, ni tu idioma.
-- **No sube nada tuyo a GitHub.** La comprobación solo lee.
-- **No se actualiza sola.** Avisa; actualizar lo decides tú.
+- **No cambia tu configuración** — ni tus claves, ni tu proveedor, ni tu idioma.
+- **No sube nada tuyo.** Solo pregunta y descarga.
+- **No se actualiza sola.** Avisa; pulsar lo decides tú.
+
+---
+
+## Para quien instaló BIMNEMO con `git clone`
+
+Si eres de quien desarrolla y tienes el repositorio clonado, el botón funciona
+igual pero por otro camino: compara commits contra `main` en vez de versiones
+publicadas, y descarga con git.
+
+**Cuidado con una diferencia:** si has modificado ficheros del programa,
+actualizar los descarta. BIMNEMO te avisa antes y te deja elegir. Para
+conservarlos:
+
+```bash
+git stash
+git pull origin main
+pip install -e .[api]
+git stash pop
+```
+
+Después, **Motor → Reiniciar motor LightRAG**.
