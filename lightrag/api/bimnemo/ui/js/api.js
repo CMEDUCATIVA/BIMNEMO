@@ -194,6 +194,16 @@ export const restartEngine = () => postJson('/bimnemo/restart', {});
  * el guardia de las rutas se construye al arrancar. La respuesta pide
  * reinicio.
  */
+/** ¿Hay una versión nueva publicada? */
+export const getUpdateStatus = (force = false) =>
+  request(`/bimnemo/update${force ? '?force=true' : ''}`);
+
+/** Trae la versión publicada y reinicia. Responde en cuanto lanza el trabajo. */
+export const applyUpdate = (discardLocalChanges = false) =>
+  postJson('/bimnemo/update/apply', {
+    discard_local_changes: discardLocalChanges,
+  });
+
 export const setAccess = (enabled, key) =>
   postJson('/bimnemo/access', { enabled, key: key || null });
 

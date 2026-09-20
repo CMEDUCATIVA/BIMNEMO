@@ -6,6 +6,7 @@
 
 import { getAppBuild, getHealth } from './api.js';
 import { icon } from './icons.js';
+import { mountActualizar } from './actualizar.js';
 import { mountDialogo, preguntar } from './dialogo.js';
 import { renderPanel } from './panel.js';
 import {
@@ -263,6 +264,7 @@ async function start() {
   // Cada vista se monta una vez. Chat no pide datos al servidor, así que va
   // primero y queda usable aunque el resto tarde.
   mountDialogo();
+  mountActualizar();
   mountProgressVisibility();
   mountChat();
   mountConfiguracion();

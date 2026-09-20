@@ -38,6 +38,9 @@
                 data-icon="trash-2" data-icon-size="13"></button>
       </div>
       <div class="topbar__actions">
+        <!-- Al lado del estado del motor, no en su lugar: el punto contesta
+             «¿funciona?» y esto «¿está al día?». Son dos preguntas. -->
+        <button type="button" class="actualizar" id="update-button" hidden></button>
         <span class="badge badge--neutral" id="engine-state">
           <span class="dot" data-state="idle"></span>
           <span id="engine-state-text">Comprobando…</span>

@@ -44,6 +44,7 @@ from lightrag.utils import logger
 
 from ..utils_api import get_combined_auth_dependency, internal_server_error
 from .bimnemo_documents_routes import create_bimnemo_documents_routes
+from .bimnemo_update_routes import create_bimnemo_update_routes
 from .bimnemo_engine_routes import create_bimnemo_engine_routes
 from .bimnemo_settings_routes import create_bimnemo_settings_routes
 
@@ -554,6 +555,15 @@ def create_bimnemo_routes(
     # segunda resolución acabaría discrepando, y se borraría en otra memoria.
     router.include_router(
         create_bimnemo_documents_routes(doc_manager, _resolve_rag, api_key)
+    )
+    # Actualizar el programa no es una operación sobre la memoria, pero se
+    # niega por lo mismo que el reinicio —una ingesta a medias—, así que se le
+    # inyecta la MISMA comprobación de ocupado. Dos versiones de «¿está
+    # ocupado?» acabarían discrepando justo cuando importa.
+    from .document_routes import check_pipeline_busy_or_raise
+
+    router.include_router(
+        create_bimnemo_update_routes(rag, check_pipeline_busy_or_raise, api_key)
     )
 
     return router

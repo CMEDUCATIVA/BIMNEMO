@@ -485,3 +485,75 @@
 @media (max-width: 640px) {
   .stale { margin: 0.75rem 1rem 0; flex-wrap: wrap; }
 }
+
+/* --------------------------------------------------------------------------
+   Botón de actualizar, en el encabezado
+   Contesta «¿estoy al día?», que es otra pregunta que «¿funciona?» —eso lo
+   dice el punto de al lado—. Por eso son dos elementos y no uno.
+   -------------------------------------------------------------------------- */
+
+.actualizar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--content-tertiary);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-oe),
+    color var(--duration-fast) var(--ease-oe),
+    border-color var(--duration-fast) var(--ease-oe);
+}
+
+.actualizar[hidden] { display: none; }
+.actualizar:disabled { cursor: default; }
+.actualizar__icon { display: flex; }
+
+/* Al día: presente pero callado. Es el estado normal y no debe pedir nada. */
+.actualizar[data-estado='al-dia'] { color: var(--state-ok); }
+.actualizar[data-estado='al-dia']:hover { background: var(--surface-tertiary); }
+
+/* Buscando: el icono gira, que es la señal de «vivo» que se ve sin leer. */
+.actualizar[data-estado='buscando'] .actualizar__icon .icon {
+  animation: actualizar-gira 1.4s linear infinite;
+}
+
+/* Sin conexión: apagado, no alarmante. No poder preguntar a GitHub no es una
+   avería de BIMNEMO y no tiene que parecerlo. */
+.actualizar[data-estado='sin-red'] { color: var(--content-quaternary); }
+
+/* Hay versión nueva: parpadea.
+   Está bien que parpadee **porque es raro**. Una versión no aparece cada
+   hora; un elemento que parpadea siempre deja de verse a los dos días. */
+.actualizar[data-estado='hay'] {
+  color: #fff;
+  background: var(--oe-blue);
+  border-color: transparent;
+  animation: actualizar-late 1.8s var(--ease-oe) infinite;
+}
+
+.actualizar[data-estado='hay']:hover { animation: none; filter: brightness(1.08); }
+
+@keyframes actualizar-late {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(37, 99, 235, 0); }
+}
+
+@keyframes actualizar-gira {
+  to { transform: rotate(360deg); }
+}
+
+/* Quien desactiva las animaciones no se queda sin el aviso: se resalta. */
+@media (prefers-reduced-motion: reduce) {
+  .actualizar[data-estado='hay'] {
+    animation: none;
+    outline: 2px solid var(--oe-blue);
+    outline-offset: 2px;
+  }
+  .actualizar[data-estado='buscando'] .actualizar__icon .icon { animation: none; }
+}
