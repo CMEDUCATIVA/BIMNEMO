@@ -1,0 +1,97 @@
+# ── MUESTRA ───────────────────────────────────────────────────────────────
+# Para usarlo, cópialo a `prompts/entity_type/entity_type_prompt.yml` y pon
+# en el `.env`:
+#
+#     SUMMARY_LANGUAGE=Spanish
+#     ENTITY_TYPE_PROMPT_FILE=entity_type_prompt.yml
+#
+# La carpeta `prompts/entity_type/` no se versiona —es configuración de cada
+# instalación—, por eso el perfil vive aquí como muestra.
+# ──────────────────────────────────────────────────────────────────────────
+
+# Perfil de tipos de entidad en español — BIMNEMO
+#
+# Por qué existe: `SUMMARY_LANGUAGE=Spanish` hace que el motor escriba en
+# español los NOMBRES, las palabras clave y las DESCRIPCIONES de las entidades,
+# pero no el TIPO. El tipo lo toma de una taxonomía que el prompt trae en
+# inglés, así que el grafo salía con entidades en español etiquetadas como
+# `person`, `organization`, `data` o `artifact` — y esos rótulos se ven en la
+# leyenda del grafo y en la ficha de cada entidad.
+#
+# Este fichero sustituye esa taxonomía por una equivalente en español.
+#
+# Lo carga `ENTITY_TYPE_PROMPT_FILE=entity_type_prompt.yml` desde
+# `PROMPT_DIR/entity_type/` (PROMPT_DIR es `./prompts` por defecto).
+#
+# AVISO: el tipo se fija al extraer. Cambiar esta tabla no reescribe lo que ya
+# está indexado; para unificarlo hay que vaciar la memoria y reindexar.
+#
+# `entity_extraction_examples` es obligatorio mientras
+# `ENTITY_EXTRACTION_USE_JSON` esté desactivado (es el valor por defecto);
+# `entity_extraction_json_examples` cubre el caso contrario, para que activarlo
+# no rompa nada.
+
+entity_types_guidance: |
+  Clasifica cada entidad con uno de estos tipos. Si ninguno encaja, usa `Otro`.
+
+  - Persona: individuos humanos, reales o ficticios
+  - Organización: empresas, instituciones, administraciones, equipos, gremios
+  - Proyecto: obras, encargos e iniciativas con nombre propio, alcance y plazo
+  - Lugar: ubicaciones geográficas (ciudades, países, parcelas, edificios)
+  - Evento: sucesos, hitos, actos, reuniones, incidencias
+  - Concepto: ideas abstractas, principios, criterios, condiciones
+  - Método: procedimientos, técnicas, procesos constructivos, ensayos
+  - Documento: obras informativas o creativas (informes, pliegos, actas, planos)
+  - Dato: información cuantitativa o estructurada (plazos, importes, mediciones)
+  - Objeto: objetos físicos o digitales creados por personas (materiales,
+    equipos, elementos constructivos, modelos, programas)
+  - Material: objetos naturales o no fabricados (minerales, áridos, terreno,
+    compuestos químicos)
+
+  Escribe el tipo exactamente como aparece en esta lista, en español.
+
+entity_extraction_examples:
+  - |
+    entity{tuple_delimiter}Proyecto Norte{tuple_delimiter}Proyecto{tuple_delimiter}Edificio residencial de 42 viviendas repartidas en dos bloques.
+    entity{tuple_delimiter}Constructora Levante{tuple_delimiter}Organización{tuple_delimiter}Empresa adjudicataria de la ejecución de la obra.
+    entity{tuple_delimiter}Jorge Mena{tuple_delimiter}Persona{tuple_delimiter}Jefe de obra designado por la constructora adjudicataria.
+    entity{tuple_delimiter}Pliego de condiciones{tuple_delimiter}Documento{tuple_delimiter}Documento que fija las condiciones técnicas y administrativas del contrato.
+    entity{tuple_delimiter}Plazo de ejecución{tuple_delimiter}Dato{tuple_delimiter}Periodo acordado para terminar la obra, contado desde el acta de replanteo.
+    relation{tuple_delimiter}Jorge Mena{tuple_delimiter}Constructora Levante{tuple_delimiter}pertenencia, responsabilidad{tuple_delimiter}Jorge Mena dirige la obra en nombre de Constructora Levante.
+    relation{tuple_delimiter}Plazo de ejecución{tuple_delimiter}Pliego de condiciones{tuple_delimiter}regulación, plazo{tuple_delimiter}El pliego de condiciones fija el plazo de ejecución y sus penalizaciones.
+    {completion_delimiter}
+
+entity_extraction_json_examples:
+  - |
+    {
+      "entities": [
+        {
+          "name": "Proyecto Norte",
+          "type": "Proyecto",
+          "description": "Edificio residencial de 42 viviendas repartidas en dos bloques."
+        },
+        {
+          "name": "Constructora Levante",
+          "type": "Organización",
+          "description": "Empresa adjudicataria de la ejecución de la obra."
+        },
+        {
+          "name": "Jorge Mena",
+          "type": "Persona",
+          "description": "Jefe de obra designado por la constructora adjudicataria."
+        },
+        {
+          "name": "Plazo de ejecución",
+          "type": "Dato",
+          "description": "Periodo acordado para terminar la obra, contado desde el acta de replanteo."
+        }
+      ],
+      "relationships": [
+        {
+          "source": "Jorge Mena",
+          "target": "Constructora Levante",
+          "keywords": "pertenencia, responsabilidad",
+          "description": "Jorge Mena dirige la obra en nombre de Constructora Levante."
+        }
+      ]
+    }

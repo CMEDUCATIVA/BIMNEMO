@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BIMNEMO — Memoria de conocimiento</title>
+  <meta name="description" content="Memoria de conocimiento local sobre el motor LightRAG.">
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/forms.css">
+  <link rel="stylesheet" href="css/views.css">
+  <link rel="stylesheet" href="css/nemo.css">
+  <link rel="stylesheet" href="css/grafo.css">
+  <link rel="stylesheet" href="css/progreso.css">
+  <link rel="stylesheet" href="css/reinicio.css">
+  <link rel="stylesheet" href="css/api.css">
+</head>
+<body>
+  <div class="app">
+
+    <!-- ================= Barra superior ================= -->
+    <header class="topbar">
+      <div class="topbar__brand">
+        <span class="topbar__mark" data-icon="network" data-icon-size="17"></span>
+        <span class="topbar__name">BIMNEMO</span>
+        <span class="topbar__tagline">Memoria de conocimiento</span>
+      </div>
+      <div class="topbar__nemo">
+        <label class="sr-only" for="nemo-selector">Memoria activa</label>
+        <span class="selectwrap">
+          <select class="select" id="nemo-selector"></select>
+        </span>
+        <button type="button" class="btn btn--primary btn--icon" id="btn-nemo-new"
+                title="Crear una memoria nueva" aria-label="Crear una memoria nueva"></button>
+        <button type="button" class="btn btn--ghost btn--icon" id="btn-nemo-delete"
+                title="Borrar la memoria activa" aria-label="Borrar la memoria activa"
+                data-icon="trash-2" data-icon-size="13"></button>
+      </div>
+      <div class="topbar__actions">
+        <span class="badge badge--neutral" id="engine-state">
+          <span class="dot" data-state="idle"></span>
+          <span id="engine-state-text">Comprobando…</span>
+        </span>
+        <button type="button" class="btn btn--ghost btn--icon" id="btn-refresh"
+                title="Actualizar datos" aria-label="Actualizar datos"
+                data-icon="refresh-cw" data-icon-size="14"></button>
+        <button type="button" class="btn btn--ghost btn--icon" id="btn-theme"
+                title="Cambiar tema" aria-label="Cambiar tema"></button>
+      </div>
+    </header>
+
+    <div class="shell">
+
+      <!-- ================= Carril lateral ================= -->
+      <aside class="rail">
+        <nav class="rail__section" aria-label="Secciones">
+          <div class="rail__label">Navegación</div>
+          <div class="rail__nav">
+            <button type="button" class="navitem" data-view="panel" title="Panel" aria-current="page">
+              <span data-icon="layout-dashboard" data-icon-size="14"></span>
+              <span>Panel</span>
+            </button>
+            <button type="button" class="navitem" data-view="archivos" title="Archivos">
+              <span data-icon="folder" data-icon-size="14"></span>
+              <span>Archivos</span>
+              <span class="navitem__count" id="nav-files-count">—</span>
+            </button>
+            <button type="button" class="navitem" data-view="chat" title="Chat">
+              <span data-icon="message-square" data-icon-size="14"></span>
+              <span>Chat</span>
+            </button>
+            <button type="button" class="navitem" data-view="configuracion" title="Configuración IA">
+              <span data-icon="settings" data-icon-size="14"></span>
+              <span>Configuración IA</span>
+              <span class="navitem__count" id="nav-config-flag"></span>
+            </button>
+            <button type="button" class="navitem" data-view="motor" title="Motor">
+              <span data-icon="sliders-horizontal" data-icon-size="14"></span>
+              <span>Motor</span>
+            </button>
+            <button type="button" class="navitem" data-view="api" title="API">
+              <span data-icon="plug" data-icon-size="14"></span>
+              <span>API</span>
+            </button>
+          </div>
+        </nav>
+
+        <div class="rail__section rail__section--resumen">
+          <div class="rail__label">
+            <span data-icon="hard-drive" data-icon-size="11"></span>
+            <span>Almacenado</span>
+          </div>
+          <div class="rail__figure tabular" id="rail-storage">—</div>
+          <div class="tile__note" id="rail-files">—</div>
+          <div class="meter meter--thin" id="rail-meter" role="img"
+               aria-label="Reparto del almacenamiento por categoría"></div>
+        </div>
+
+        <div class="rail__section rail__section--resumen">
+          <div class="rail__label">Categorías</div>
+          <div class="chips" id="rail-categories"></div>
+        </div>
+      </aside>
+
+      <!-- ================= Zona de trabajo ================= -->
+      <main class="workspace" id="workspace">
+
+        <div id="stale-banner"></div>
+
+
+
+        <!-- ---------- Panel ---------- -->
+        <!-- Sin cabecera a propósito: el título repetía lo que ya dice el
+             carril, y su espacio se lo queda el grafo. El nombre de la vista
+             lo aporta aria-label, que es lo que lee un lector de pantalla. -->
+        <section class="view is-active" id="view-panel" aria-label="Panel">
+          <div class="view__body view__body--flush stack">
+            <div id="panel-alerts"></div>
+
+            <!-- ---------- Primera vista: grafo + cifras ---------- -->
+            <div class="hero">
+              <!-- ---------- Grafo de conocimiento ---------- -->
+              <div class="card">
+                <div class="card__head">
+                  <span class="card__title">
+                    <span data-icon="network" data-icon-size="14"></span>
+                    Grafo de conocimiento
+                  </span>
+                  <span class="card__hint" id="graph-hint">—</span>
+                </div>
+                <div class="card__body">
+                  <div class="graphbar">
+                    <label class="graphbar__field">
+                      <span class="graphbar__label">Entidad de partida</span>
+                      <span class="selectwrap">
+                        <select class="select" id="graph-label">
+                          <option value="*">Todo el grafo</option>
+                        </select>
+                      </span>
+                    </label>
+                    <label class="graphbar__field graphbar__field--narrow">
+                      <span class="graphbar__label">Profundidad</span>
+                      <span class="selectwrap">
+                        <select class="select" id="graph-depth">
+                          <option value="1">1 salto</option>
+                          <option value="2">2 saltos</option>
+                          <option value="3" selected>3 saltos</option>
+                          <option value="4">4 saltos</option>
+                          <option value="5">5 saltos</option>
+                        </select>
+                      </span>
+                    </label>
+                    <label class="graphbar__field graphbar__field--narrow">
+                      <span class="graphbar__label">Nodos máx.</span>
+                      <span class="selectwrap">
+                        <select class="select" id="graph-max">
+                          <option value="100">100</option>
+                          <option value="250" selected>250</option>
+                          <option value="500">500</option>
+                          <option value="1000">1000</option>
+                        </select>
+                      </span>
+                    </label>
+                    <label class="graphbar__field graphbar__field--medium">
+                      <span class="graphbar__label">Disposición</span>
+                      <span class="selectwrap">
+                        <select class="select" id="graph-layout"></select>
+                      </span>
+                    </label>
+                    <label class="graphbar__field">
+                      <span class="graphbar__label">
+                        Buscar entidad
+                        <span class="graphbar__hint" id="graph-search-hint"></span>
+                      </span>
+                      <input type="search" class="input" id="graph-search"
+                             placeholder="Resaltar por nombre…" autocomplete="off">
+                    </label>
+                    <div class="graphbar__actions">
+                      <button type="button" class="btn btn--ghost btn--icon" id="graph-zoom-out"
+                              title="Alejar" aria-label="Alejar"
+                              data-icon="minus" data-icon-size="14"></button>
+                      <button type="button" class="btn btn--ghost btn--icon" id="graph-zoom-in"
+                              title="Acercar" aria-label="Acercar"
+                              data-icon="plus" data-icon-size="14"></button>
+                      <button type="button" class="btn btn--ghost btn--icon" id="graph-fit"
+                              title="Encajar el grafo" aria-label="Encajar el grafo"
+                              data-icon="maximize" data-icon-size="14"></button>
+                      <button type="button" class="btn btn--ghost btn--icon" id="graph-reload"
+                              title="Volver a leer el grafo" aria-label="Volver a leer el grafo"
+                              data-icon="refresh-cw" data-icon-size="14"></button>
+                    </div>
+                  </div>
+
+                  <div class="graph" id="graph-stage">
+                    <canvas id="graph-canvas" class="graph__canvas"
+                            aria-label="Grafo de entidades y relaciones de la memoria"></canvas>
+                    <div class="graph__hint" id="graph-hint-overlay" aria-hidden="true">
+                    Pulsa para mover y ampliar el grafo
+                  </div>
+                  <div class="graph__empty" id="graph-empty" hidden></div>
+                    <aside class="ficha" id="graph-inspector" hidden></aside>
+                  </div>
+
+                  <div class="legend" id="graph-legend"></div>
+                  <p class="card__hint graph__help">
+                    Arrastra para mover el lienzo, rueda para acercar, y pulsa una
+                    entidad para ver su ficha y aislar sus relaciones.
+                  </p>
+                </div>
+              </div>
+
+              <div class="tiles tiles--column" id="panel-tiles"></div>
+            </div>
+
+            <div class="card">
+              <div class="card__body">
+                <div class="storage__head">
+                  <span class="storage__caption">Almacenamiento por categoría</span>
+                  <span class="storage__total tabular" id="panel-storage-total">—</span>
+                </div>
+                <div class="meter" id="panel-meter" role="img"
+                     aria-label="Reparto del almacenamiento por categoría"></div>
+                <div class="legend" id="panel-legend"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <span class="card__title">
+                  <span data-icon="library" data-icon-size="14"></span>
+                  Memorias
+                </span>
+                <span class="card__hint">Pulsa una para trabajar en ella</span>
+              </div>
+              <div class="card__body">
+                <div class="nemohead">
+                  <span></span><span></span><span></span>
+                  <span class="nemohead__num">archivos</span>
+                  <span class="nemohead__num">tamaño</span>
+                  <span class="nemohead__num">docs</span>
+                </div>
+                <div class="nemolist" id="panel-nemos"></div>
+              </div>
+            </div>
+
+            <div class="split">
+              <div class="card">
+                <div class="card__head">
+                  <span class="card__title">
+                    <span data-icon="layers" data-icon-size="14"></span>
+                    Categorías
+                  </span>
+                  <span class="card__hint" id="panel-cat-hint">—</span>
+                </div>
+                <div class="card__body">
+                  <div class="catgrid" id="panel-categories"></div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card__head">
+                  <span class="card__title">
+                    <span data-icon="file-text" data-icon-size="14"></span>
+                    Tipos de archivo
+                  </span>
+                  <span class="card__hint" id="panel-types-hint">—</span>
+                </div>
+                <div class="card__body">
+                  <div class="typelist" id="panel-types"></div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- ---------- Archivos ---------- -->
+        <section class="view" id="view-archivos" aria-labelledby="t-archivos">
+          <div class="view__header">
+            <div>
+              <h1 class="view__title" id="t-archivos">Archivos</h1>
+              <p class="view__subtitle">Sube documentos y míralos entrar en la memoria.</p>
+            </div>
+            <div class="row">
+              <button type="button" class="btn" id="btn-scan">
+                <span data-icon="refresh-cw" data-icon-size="13"></span>
+                Reindexar pendientes
+              </button>
+              <button type="button" class="btn btn--primary" id="btn-pick">
+                <span data-icon="cloud-upload" data-icon-size="14"></span>
+                Subir archivos
+              </button>
+            </div>
+          </div>
+          <div class="view__body stack">
+            <input type="file" id="file-input" multiple hidden>
+
+            <div class="dropzone" id="dropzone">
+              <span data-icon="cloud-upload" data-icon-size="26"></span>
+              <span class="dropzone__title">Arrastra aquí tus archivos</span>
+              <span class="dropzone__hint" id="dropzone-hint">
+                Comprobando qué formatos admite el motor…
+              </span>
+            </div>
+
+            <div class="card" id="queue-card" hidden>
+              <div class="card__head">
+                <span class="card__title">
+                  <span data-icon="inbox" data-icon-size="14"></span>
+                  Subidas
+                </span>
+                <button type="button" class="btn btn--ghost" id="btn-clear-queue">Limpiar</button>
+              </div>
+              <div class="card__body">
+                <div class="queue" id="queue"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <span class="card__title">
+                  <span data-icon="folder" data-icon-size="14"></span>
+                  Almacenados
+                </span>
+                <span class="card__hint" id="files-hint">—</span>
+              </div>
+              <div class="card__body stack stack--tight">
+                <!-- El progreso no tiene bloque propio: vive dentro de la
+                     columna de estado de cada fila, que es de quien habla. -->
+                <div class="chips" id="files-filters"></div>
+                <div class="table-wrap">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Archivo</th>
+                        <th scope="col">Categoría</th>
+                        <th scope="col">Tipo</th>
+                        <th scope="col" class="table__num">Tamaño</th>
+                        <th scope="col">Estado</th>
+                        <th scope="col" class="table__num">Fragmentos</th>
+                        <th scope="col">Modificado</th>
+                        <th scope="col" class="table__acciones">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody id="files-body"></tbody>
+                  </table>
+                </div>
+                <div id="files-empty"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- Chat ---------- -->
+        <section class="view" id="view-chat" aria-labelledby="t-chat">
+          <h1 class="sr-only" id="t-chat">Chat con la memoria</h1>
+          <div class="chat">
+            <div class="chat__bar">
+              <div class="chat__controls">
+                <label class="card__hint" for="chat-scope">Buscar en</label>
+                <span class="selectwrap">
+                  <select class="select" id="chat-scope">
+                    <option value="__all__" selected>Todas las memorias</option>
+                  </select>
+                </span>
+                <label class="card__hint" for="chat-mode">Modo</label>
+                <span class="selectwrap">
+                  <select class="select" id="chat-mode">
+                    <option value="mix" selected>mix — grafo + vectores</option>
+                    <option value="hybrid">hybrid — local + global</option>
+                    <option value="local">local — entidades concretas</option>
+                    <option value="global">global — relaciones y temas</option>
+                    <option value="naive">naive — solo vectores</option>
+                  </select>
+                </span>
+                <label class="card__hint" for="chat-kind">Devolver</label>
+                <span class="selectwrap">
+                  <select class="select" id="chat-kind">
+                    <option value="answer" selected>Respuesta generada</option>
+                    <option value="context">Solo contexto recuperado</option>
+                  </select>
+                </span>
+              </div>
+              <button type="button" class="btn btn--ghost" id="btn-clear-chat">
+                <span data-icon="trash-2" data-icon-size="13"></span>
+                Vaciar
+              </button>
+            </div>
+
+            <div class="chat__log" id="chat-log" aria-live="polite"></div>
+
+            <form class="chat__composer" id="chat-form">
+              <textarea class="textarea" id="chat-input" rows="1"
+                        placeholder="Pregunta a tu memoria… (Enter envía, Mayús+Enter salta línea)"
+                        aria-label="Tu pregunta"></textarea>
+              <button type="submit" class="btn btn--primary" id="btn-send">
+                <span data-icon="send" data-icon-size="14"></span>
+                Enviar
+              </button>
+            </form>
+          </div>
+        </section>
+
+        <!-- ---------- Configuración IA ---------- -->
+        <section class="view" id="view-configuracion" aria-labelledby="t-config">
+          <div class="view__header">
+            <div>
+              <h1 class="view__title" id="t-config">Configuración IA</h1>
+              <p class="view__subtitle">
+                Elige qué modelos usa tu memoria. Se guarda en el <code>.env</code>.
+              </p>
+            </div>
+            <div class="row">
+              <button type="button" class="btn" id="btn-config-reload">
+                <span data-icon="refresh-cw" data-icon-size="13"></span>
+                Descartar cambios
+              </button>
+              <button type="button" class="btn btn--primary" id="btn-config-save">
+                <span data-icon="check" data-icon-size="14"></span>
+                Guardar
+              </button>
+            </div>
+          </div>
+          <div class="view__body stack" id="config-body"></div>
+        </section>
+
+        <!-- ---------- Motor ---------- -->
+        <section class="view" id="view-motor" aria-labelledby="t-motor">
+          <div class="view__header">
+            <div>
+              <h1 class="view__title" id="t-motor">Motor</h1>
+              <p class="view__subtitle">Configuración con la que LightRAG está funcionando ahora.</p>
+            </div>
+          </div>
+          <div class="view__body stack" id="engine-body"></div>
+        </section>
+
+        <!-- ---------- API ---------- -->
+        <section class="view" id="view-api" aria-labelledby="t-api">
+          <div class="view__header">
+            <div>
+              <h1 class="view__title" id="t-api">API</h1>
+              <p class="view__subtitle">
+                Conecta cualquier IA a esta memoria. Documentación viva en Swagger.
+              </p>
+            </div>
+            <!-- Swagger y ReDoc ya no se van a una pestaña del navegador:
+                 se abren aquí dentro, en sus propias solapas. -->
+            <div class="solapas" role="tablist" aria-label="Documentación de la API">
+              <button type="button" class="solapa" role="tab"
+                      data-solapa="guia" aria-selected="true">Guía</button>
+              <button type="button" class="solapa" role="tab"
+                      data-solapa="swagger" aria-selected="false">Swagger</button>
+              <button type="button" class="solapa" role="tab"
+                      data-solapa="redoc" aria-selected="false">ReDoc</button>
+            </div>
+          </div>
+          <div class="view__body stack" id="api-body"></div>
+          <div class="view__body doc-marco" id="api-doc" hidden></div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <dialog class="dialog" id="nemo-dialog">
+    <form method="dialog" class="dialog__form" id="nemo-dialog-form">
+      <h2 class="dialog__title">Nueva memoria</h2>
+      <p class="dialog__text">
+        Cada memoria indexa y relaciona sus documentos por separado. Lo que
+        guardes aquí no se mezclará con el resto.
+      </p>
+      <div class="field">
+        <label class="field__label" for="nemo-new-name">Nombre</label>
+        <input class="input" id="nemo-new-name" type="text" maxlength="60"
+               autocomplete="off" placeholder="Proyecto Norte">
+        <span class="field__help" id="nemo-dialog-error" role="alert"></span>
+      </div>
+      <div class="dialog__actions">
+        <button type="button" class="btn" id="nemo-dialog-cancel">Cancelar</button>
+        <button type="submit" class="btn btn--primary" id="nemo-dialog-create">
+          Crear memoria
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Borrar una memoria: diálogo propio, no el del navegador.
+       El cuadro nativo de Chrome no se puede ajustar, no admite formato y se
+       ve como una alerta del sistema encima de la aplicación. Éste explica
+       qué se pierde y exige escribir el nombre, que es el resguardo real. -->
+  <dialog class="dialog dialog--peligro" id="nemo-delete-dialog">
+    <form method="dialog" class="dialog__form" id="nemo-delete-form">
+      <h2 class="dialog__title">
+        <span class="dialog__mark" data-icon="triangle-alert" data-icon-size="15"></span>
+        <span id="nemo-delete-title">Borrar memoria</span>
+      </h2>
+
+      <div class="notice notice--error" id="nemo-delete-warning"></div>
+
+      <div class="field" id="nemo-delete-field">
+        <label class="field__label" for="nemo-delete-name">
+          Escribe el nombre exacto para confirmarlo
+        </label>
+        <input class="input" id="nemo-delete-name" type="text" maxlength="60"
+               autocomplete="off" spellcheck="false">
+        <span class="field__help" id="nemo-delete-error" role="alert"></span>
+      </div>
+
+      <div class="dialog__actions">
+        <button type="button" class="btn" id="nemo-delete-cancel">Cancelar</button>
+        <button type="submit" class="btn btn--peligro" id="nemo-delete-confirm" disabled>
+          Borrar definitivamente
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Borrar un archivo. Sin escribir el nombre, a diferencia del de las
+       memorias: perder un archivo es grave, pero se puede volver a subir;
+       perder una memoria entera, no. La confirmación se ajusta al riesgo. -->
+  <dialog class="dialog dialog--peligro" id="file-delete-dialog">
+    <form method="dialog" class="dialog__form" id="file-delete-form">
+      <h2 class="dialog__title">
+        <span class="dialog__mark" data-icon="triangle-alert" data-icon-size="15"></span>
+        <span id="file-delete-title">Borrar archivo</span>
+      </h2>
+      <div class="notice notice--error" id="file-delete-warning"></div>
+      <span class="field__help" id="file-delete-error" role="alert"></span>
+      <div class="dialog__actions">
+        <button type="button" class="btn" id="file-delete-cancel">Cancelar</button>
+        <button type="submit" class="btn btn--peligro" id="file-delete-confirm">
+          Borrar
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Preguntar y avisar, en lugar de los cuadros del navegador. Uno solo
+       para toda la aplicación: lo reutiliza quien lo necesite. -->
+  <dialog class="dialog" id="ask-dialog">
+    <form method="dialog" class="dialog__form">
+      <h2 class="dialog__title">
+        <span class="dialog__mark" id="ask-mark"></span>
+        <span id="ask-title"></span>
+      </h2>
+      <p class="dialog__text" id="ask-text"></p>
+      <div class="dialog__actions">
+        <button type="button" class="btn" id="ask-cancel">Cancelar</button>
+        <button type="button" class="btn btn--primary" id="ask-ok">Aceptar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- La cortina del reinicio. Vive fuera del área de trabajo porque tapa la
+       ventana entera: mientras dura no hay motor detrás. -->
+  <div class="cortina" id="restart-curtain" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

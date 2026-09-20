@@ -1,0 +1,273 @@
+/* ==========================================================================
+   BIMNEMO — Grafo de conocimiento
+   --------------------------------------------------------------------------
+   Barra de opciones, lienzo y ficha de la entidad seleccionada.
+   Ningún color literal: todo sale de tokens.css.
+   ========================================================================== */
+
+/* --- Barra de opciones ---------------------------------------------------- */
+
+.graphbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.625rem 0.75rem;
+  margin-bottom: 0.875rem;
+}
+
+.graphbar__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+  /* Base estrecha a propósito. Dentro de la primera vista la tarjeta del
+     grafo comparte fila con la columna de cifras, así que hay unos 250 px
+     menos: con la base anterior los botones caían a una segunda línea y se
+     quedaban sueltos a la izquierda. */
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+/* Profundidad y tope son números cortos: no deben robarle sitio al resto. */
+.graphbar__field--narrow { flex: 0 1 8.5rem; }
+
+/* La disposición necesita algo más: «Radial por conexiones» no cabe en 8,5rem. */
+.graphbar__field--medium { flex: 0 1 10.5rem; }
+
+.graphbar__label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--content-tertiary);
+}
+
+.graphbar__hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--content-quaternary);
+}
+
+.graphbar__actions {
+  display: flex;
+  gap: 0.25rem;
+  /* Se alinean con la base de los campos, no con sus rótulos. */
+  padding-bottom: 0.0625rem;
+}
+
+/* --- Lienzo --------------------------------------------------------------- */
+
+.graph {
+  position: relative;
+  /* Alto MÍNIMO, no fijo: dentro de la primera vista el lienzo se estira para
+     igualar la columna de cifras. Con `height` no podría crecer y el grafo se
+     quedaría corto en pantallas altas. El usuario pidió más alto: de 26rem a
+     34rem, que en una ventana de 1000 px sigue entrando entero. */
+  min-height: 34rem;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  background: var(--surface-base);
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   El lienzo va POSICIONADO, no en el flujo. Y es la diferencia entre que
+   funcione y que no.
+
+   Con `height: 100%` dentro de un contenedor de alto automático, el porcentaje
+   no se puede resolver y el navegador cae en el tamaño intrínseco del canvas
+   — que es su mapa de bits. O sea: el mapa de bits acaba mandando sobre la
+   maquetación en lugar de seguirla. Al volver de otra pestaña el lienzo se
+   volvía cuadrado (1020 × 1020) y arrastraba la primera vista a 1225 px de
+   alto, sin recuperarse ni al redimensionar la ventana.
+
+   Sacándolo del flujo con `inset: 0`, `.graph` toma su alto del flex y del
+   mínimo, y el lienzo se limita a rellenarlo. No hay realimentación posible.
+   -------------------------------------------------------------------------- */
+
+.graph__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  /* Sin esto, arrastrar el grafo en un portátil táctil desplaza la página. */
+  touch-action: none;
+}
+
+.graph__canvas:active { cursor: grabbing; }
+
+/* --------------------------------------------------------------------------
+   Pista de «pulsa para interactuar»
+   Solo se ve con el grafo en reposo, y desaparece en cuanto se pulsa. Sin
+   ella, que la rueda desplace la página parecería que el grafo no responde;
+   con ella, se entiende que está esperando.
+   -------------------------------------------------------------------------- */
+
+.graph__hint {
+  position: absolute;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  padding: 0.3125rem 0.75rem;
+  border-radius: var(--radius-full);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--text-2xs);
+  color: var(--content-tertiary);
+  /* No intercepta el clic que precisamente la hace desaparecer. */
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-normal) var(--ease-oe);
+}
+
+.graph.is-idle .graph__hint { opacity: 1; }
+
+/* En reposo el lienzo es un dibujo, y el cursor lo dice. */
+.graph.is-idle .graph__canvas { cursor: default; }
+
+.graph__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--content-tertiary);
+  font-size: var(--text-sm);
+  background: var(--surface-base);
+}
+
+.graph__empty p { max-width: 32rem; }
+.graph__empty strong { color: var(--content-primary); }
+.graph__empty .icon { color: var(--content-quaternary); }
+
+.graph__help { margin-top: 0.625rem; }
+
+/* --- Ficha de la entidad -------------------------------------------------- */
+
+.ficha {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 17rem;
+  max-height: calc(100% - 1.5rem);
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-sm);
+}
+
+.ficha__head {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  min-width: 0;
+}
+
+.ficha__dot {
+  flex: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: var(--radius-full);
+  background: var(--cat, var(--cat-slate));
+}
+
+.ficha__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--content-primary);
+}
+
+.ficha__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: var(--text-2xs);
+  color: var(--content-tertiary);
+}
+
+.ficha__pill {
+  padding: 0.125rem 0.4375rem;
+  border-radius: var(--radius-full);
+  background: var(--cat-soft, var(--cat-slate-soft));
+  color: var(--cat, var(--cat-slate));
+  font-weight: 600;
+}
+
+.ficha__text {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--content-secondary);
+}
+
+.ficha__text--muted { color: var(--content-quaternary); }
+
+.ficha__source {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-2xs);
+  color: var(--content-tertiary);
+}
+
+.ficha__source .icon { flex: none; }
+
+/* --------------------------------------------------------------------------
+   Ventana estrecha
+   La ficha flotante ocuparía casi todo el lienzo, así que pasa a ser una
+   franja abajo: se sigue viendo el grafo mientras se lee la entidad.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .graph { min-height: 22rem; }
+
+  /* Dos campos por fila: apilarlos de uno en uno empujaría el lienzo fuera
+     de la pantalla antes de que se viera nada del grafo. */
+  .graphbar__field,
+  .graphbar__field--narrow,
+  .graphbar__field--medium { flex: 1 1 45%; }
+
+  .graphbar__actions { flex: 1 1 100%; justify-content: flex-end; }
+
+  .ficha {
+    top: auto;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    width: auto;
+    max-height: 55%;
+  }
+}
+
+/* Ventana baja: el suelo de 34rem sumado a la cabecera y la barra empujaba la
+   primera vista fuera de la pantalla y obligaba a bajar para ver el grafo
+   entero. Con el suelo más bajo, el alto lo decide la ventana. */
+@media (max-height: 820px) {
+  .graph { min-height: 20rem; }
+}
+
+@media (max-width: 460px) {
+  .graphbar__field,
+  .graphbar__field--narrow,
+  .graphbar__field--medium { flex: 1 1 100%; }
+}

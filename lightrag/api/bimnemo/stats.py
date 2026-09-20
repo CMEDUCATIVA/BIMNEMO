@@ -1,0 +1,514 @@
+"""Agregación de las métricas que enseña el panel de BIMNEMO.
+
+Dos fuentes distintas, y el panel no las mezcla nunca:
+
+* **Almacenamiento** — un recorrido del directorio de entrada del
+  ``DocumentManager``. Da bytes reales en disco (``st_size``). Es lo que
+  responde a «total almacenado».
+* **Memoria** — los registros de ``doc_status`` del motor. Dan qué documentos
+  conoce LightRAG, en qué estado están, cuántos fragmentos produjeron y cuántos
+  caracteres de texto se extrajeron.
+
+Confundirlas produce un número sin significado: ``content_length`` son
+caracteres del texto extraído, no bytes del fichero. Un PDF de 40 MB puede dar
+30.000 caracteres, y un .txt de 50 KB puede dar más.
+
+Los contadores del grafo viven aparte (:func:`graph_counts`) y con tope, porque
+recorrer el grafo entero es caro y el panel no debe quedarse colgado de él.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Optional
+
+from lightrag.api.bimnemo.catalog import (
+    CATEGORIES,
+    UNKNOWN,
+    categorize,
+    file_type_label,
+)
+from lightrag.base import DocStatus
+from lightrag.exceptions import StorageCapabilityError
+from lightrag.utils import logger
+
+# Tope por defecto del recuento del grafo. Por encima, la respuesta se marca
+# como truncada y el panel lo dice: un número redondeado y honesto vale más que
+# una cifra exacta que tarda un minuto en llegar.
+DEFAULT_GRAPH_COUNT_CAP = 200_000
+
+# Tamaño de lote de la iteración acotada del grafo.
+GRAPH_ITER_BATCH = 1_000
+
+# Recorrer el directorio de entrada es E/S bloqueante; se hace en un hilo para
+# no parar el bucle de eventos mientras el servidor atiende otras peticiones.
+_SCAN_TIMEOUT_SECONDS = 30.0
+
+
+@dataclass
+class StoredFile:
+    """Un fichero encontrado en el directorio de entrada."""
+
+    name: str
+    relative_path: str
+    size_bytes: int
+    modified_at: float
+    category_key: str
+    type_label: str
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "path": self.relative_path,
+            "size_bytes": self.size_bytes,
+            "modified_at": self.modified_at,
+            "category": self.category_key,
+            "type": self.type_label,
+        }
+
+
+@dataclass
+class StorageSnapshot:
+    """Resultado de recorrer el directorio de entrada."""
+
+    files: list[StoredFile] = field(default_factory=list)
+    unreadable: int = 0
+    scan_error: str | None = None
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(f.size_bytes for f in self.files)
+
+
+def _scan_input_dir_blocking(
+    input_dir: Path, exclude: frozenset[str] = frozenset()
+) -> StorageSnapshot:
+    """Recorre el directorio de entrada. Bloqueante: llamar vía hilo.
+
+    ``exclude`` son nombres de subcarpeta de primer nivel que NO se cuentan.
+    Existe por las NEMOs: la memoria base usa la raíz de ``inputs/``, y las
+    demás viven en subcarpetas suyas. Sin excluirlas, la base contaría los
+    archivos de todas y el panel sumaría lo mismo dos veces.
+    """
+    snapshot = StorageSnapshot()
+    if not input_dir.exists():
+        # Directorio aún sin crear no es un error: es «todavía no hay nada».
+        return snapshot
+
+    for path in input_dir.rglob("*"):
+        if exclude:
+            try:
+                first = path.relative_to(input_dir).parts[0]
+            except (ValueError, IndexError):  # pragma: no cover
+                first = ""
+            if first in exclude:
+                continue
+        try:
+            if not path.is_file():
+                continue
+            stat = path.stat()
+        except OSError:
+            # Un fichero puede desaparecer entre el listado y el stat, o estar
+            # bloqueado por otro proceso. Se cuenta y se sigue: un panel que
+            # falla entero por un fichero es peor que uno que informa de él.
+            snapshot.unreadable += 1
+            continue
+
+        category = categorize(path.name)
+        try:
+            relative = path.relative_to(input_dir).as_posix()
+        except ValueError:  # pragma: no cover - rglob siempre da descendientes
+            relative = path.name
+
+        snapshot.files.append(
+            StoredFile(
+                name=path.name,
+                relative_path=relative,
+                size_bytes=stat.st_size,
+                modified_at=stat.st_mtime,
+                category_key=category.key,
+                type_label=file_type_label(path.name),
+            )
+        )
+
+    return snapshot
+
+
+async def scan_storage(
+    input_dir: Path, exclude: frozenset[str] = frozenset()
+) -> StorageSnapshot:
+    """Recorre el directorio de entrada sin bloquear el bucle de eventos.
+
+    Un directorio enorme o un disco de red lento no deben dejar el servidor sin
+    atender: pasado el plazo se devuelve un resultado vacío con ``scan_error``,
+    y el panel enseña el aviso en lugar de una cifra inventada.
+    """
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_scan_input_dir_blocking, input_dir, exclude),
+            timeout=_SCAN_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "BIMNEMO: el recorrido de %s superó %.0f s; se informa sin datos "
+            "de almacenamiento",
+            input_dir,
+            _SCAN_TIMEOUT_SECONDS,
+        )
+        return StorageSnapshot(
+            scan_error=f"El recorrido del directorio superó {_SCAN_TIMEOUT_SECONDS:.0f} s"
+        )
+    except OSError as exc:
+        logger.warning("BIMNEMO: no se pudo recorrer %s: %s", input_dir, exc)
+        return StorageSnapshot(scan_error=str(exc))
+
+
+def summarize_storage(snapshot: StorageSnapshot) -> dict[str, Any]:
+    """Totales y reparto por categoría y por tipo, listos para el panel.
+
+    Las ocho categorías del catálogo aparecen SIEMPRE, también con cero
+    ficheros: el panel enseña «N / 8» y necesita las ocho ranuras para pintar
+    las que están vacías. ``other`` solo aparece si de verdad hay algo sin
+    clasificar, y nunca cuenta como categoría en uso.
+    """
+    by_category: dict[str, dict[str, Any]] = {
+        category.key: {
+            "key": category.key,
+            "label": category.label,
+            "icon": category.icon,
+            "color": category.color,
+            "files": 0,
+            "size_bytes": 0,
+        }
+        for category in CATEGORIES
+    }
+
+    by_type: dict[str, dict[str, Any]] = {}
+    total_bytes = 0
+
+    for stored in snapshot.files:
+        bucket = by_category.get(stored.category_key)
+        if bucket is None:
+            bucket = by_category.setdefault(
+                UNKNOWN.key,
+                {
+                    "key": UNKNOWN.key,
+                    "label": UNKNOWN.label,
+                    "icon": UNKNOWN.icon,
+                    "color": UNKNOWN.color,
+                    "files": 0,
+                    "size_bytes": 0,
+                },
+            )
+        bucket["files"] += 1
+        bucket["size_bytes"] += stored.size_bytes
+        total_bytes += stored.size_bytes
+
+        type_bucket = by_type.setdefault(
+            stored.type_label,
+            {"type": stored.type_label, "files": 0, "size_bytes": 0},
+        )
+        type_bucket["files"] += 1
+        type_bucket["size_bytes"] += stored.size_bytes
+
+    categories = list(by_category.values())
+    types = sorted(by_type.values(), key=lambda t: (-t["size_bytes"], t["type"]))
+
+    return {
+        "total_files": len(snapshot.files),
+        "total_bytes": total_bytes,
+        "categories": categories,
+        "categories_in_use": sum(
+            1 for c in categories if c["files"] > 0 and c["key"] != UNKNOWN.key
+        ),
+        "categories_available": len(CATEGORIES),
+        "types": types,
+        "types_in_use": len(types),
+        "unreadable_files": snapshot.unreadable,
+        "scan_error": snapshot.scan_error,
+    }
+
+
+async def summarize_memory(rag: Any) -> dict[str, Any]:
+    """Qué documentos conoce el motor, por estado, con sus fragmentos.
+
+    Lee con ``strict=False`` a propósito: esto es una ruta de listado para la
+    interfaz, y el contrato documentado en ``BaseDocStatusStorage`` reserva
+    ``strict=True`` para el plano de control del planificador. Un registro
+    ilegible aquí debe restar de la cifra, no tumbar el panel.
+    """
+    statuses = [
+        DocStatus.PENDING,
+        DocStatus.PARSING,
+        DocStatus.ANALYZING,
+        DocStatus.PROCESSING,
+        DocStatus.PREPROCESSED,
+        DocStatus.PROCESSED,
+        DocStatus.FAILED,
+    ]
+
+    try:
+        documents = await rag.doc_status.get_docs_by_statuses(statuses, strict=False)
+    except Exception as exc:  # el panel informa, no revienta
+        logger.warning("BIMNEMO: no se pudo leer doc_status: %s", exc)
+        return {
+            "total_documents": 0,
+            "by_status": {},
+            "total_chunks": 0,
+            "total_text_chars": 0,
+            "documents_error": str(exc),
+            "failed_reason": None,
+        }
+
+    by_status: dict[str, int] = {}
+    total_chunks = 0
+    total_text_chars = 0
+    failed_reason: Optional[str] = None
+
+    for record in documents.values():
+        status_value = getattr(record.status, "value", str(record.status))
+        by_status[status_value] = by_status.get(status_value, 0) + 1
+        total_chunks += getattr(record, "chunks_count", None) or 0
+        total_text_chars += getattr(record, "content_length", None) or 0
+
+        # El motivo del primer fallo, para que el panel pueda decir POR QUÉ.
+        # Antes solo salía «N documentos fallaron», y la causa —una clave
+        # rechazada, una cuenta sin crédito, un modelo que no existe— quedaba
+        # en el registro del motor, donde nadie la busca.
+        if failed_reason is None and status_value == DocStatus.FAILED.value:
+            failed_reason = _clean_reason(getattr(record, "error_msg", None))
+
+    return {
+        "total_documents": len(documents),
+        "by_status": by_status,
+        "total_chunks": total_chunks,
+        "total_text_chars": total_text_chars,
+        "documents_error": None,
+        "failed_reason": failed_reason,
+    }
+
+
+#: Lo que cabe de un motivo de fallo sin convertir el aviso en un muro.
+MAX_REASON = 300
+
+#: Traducción de las excepciones que llegan **sin su mensaje**.
+#:
+#: Existe por cómo se pierde la causa por el camino: los reintentos envuelven
+#: la excepción original en un ``RetryError`` de tenacity, y lo que queda
+#: guardado es ``RetryError[<Future at 0x… raised RateLimitError>]``. La frase
+#: del proveedor —«Your account is not active…»— solo aparece en el registro
+#: del motor, donde el usuario no va a mirar.
+#:
+#: Aquí no se inventa lo que dijo el proveedor: se nombra el tipo de fallo y se
+#: dice qué comprobar, que es lo que hace falta para poder arreglarlo.
+_EXCEPTION_HINTS: tuple[tuple[str, str], ...] = (
+    (
+        "AuthenticationError",
+        "el proveedor rechazó la clave de API (AuthenticationError). "
+        "Compruébala en Configuración IA.",
+    ),
+    (
+        "PermissionDeniedError",
+        "la clave no tiene permiso para este modelo (PermissionDeniedError). "
+        "Revisa los permisos del proyecto o de la cuenta de servicio.",
+    ),
+    (
+        "RateLimitError",
+        "el proveedor rechazó la petición por límite de uso o por facturación "
+        "(RateLimitError). Mira el saldo y el plan de tu cuenta; el motivo "
+        "exacto está en lightrag.log.",
+    ),
+    (
+        "NotFoundError",
+        "el proveedor no reconoce el modelo configurado (NotFoundError). "
+        "Comprueba el nombre en Configuración IA.",
+    ),
+    (
+        "BadRequestError",
+        "el proveedor rechazó la petición por mal formada (BadRequestError). "
+        "Suele ser el modelo o la dimensión de embeddings.",
+    ),
+    (
+        "APIConnectionError",
+        "no se pudo conectar con el proveedor (APIConnectionError). "
+        "Comprueba la dirección (host) y tu conexión.",
+    ),
+    (
+        "APITimeoutError",
+        "el proveedor tardó más de lo permitido (APITimeoutError).",
+    ),
+)
+
+
+def _clean_reason(raw: Any) -> Optional[str]:
+    """Deja un motivo de fallo legible a partir de la excepción del motor.
+
+    Tres intentos, de más útil a menos:
+
+    1. La frase del proveedor, si viaja dentro del error.
+    2. Si los reintentos se la tragaron, el tipo de fallo traducido a qué hay
+       que comprobar.
+    3. El texto crudo recortado, que siempre es mejor que nada.
+    """
+    if not raw:
+        return None
+
+    texto = " ".join(str(raw).split())
+
+    # Las dos formas se dan de verdad: el SDK de OpenAI escupe el `repr` de un
+    # diccionario de Python (comilla simple) y otros clientes reenvían el JSON
+    # del proveedor tal cual (comilla doble). Buscar solo una era jugárselo a
+    # cara o cruz según por dónde llegara el error.
+    for marca in ("'message':", '"message":'):
+        if marca not in texto:
+            continue
+        resto = texto.split(marca, 1)[1].lstrip()
+        comilla = resto[:1]
+        if comilla not in {"'", '"'}:
+            continue
+        cerrada = resto.find(comilla, 1)
+        if cerrada > 1:
+            mensaje = resto[1:cerrada].strip()
+            if mensaje:
+                return mensaje[:MAX_REASON]
+
+    for nombre, explicacion in _EXCEPTION_HINTS:
+        if nombre in texto:
+            return explicacion[:MAX_REASON]
+
+    return texto[:MAX_REASON]
+
+
+async def graph_counts(rag: Any, cap: int = DEFAULT_GRAPH_COUNT_CAP) -> dict[str, Any]:
+    """Entidades y relaciones del grafo, contadas con memoria acotada.
+
+    Usa ``iter_labels`` / ``iter_edges`` en lugar de ``get_all_labels`` /
+    ``get_all_edges``: el propio ``BaseGraphStorage`` advierte de que las
+    segundas no deben usarse con un grafo grande, y las primeras están para
+    exactamente esto. Un backend que no las implemente falla en cerrado con
+    ``StorageCapabilityError``; entonces se devuelve ``supported: false`` en
+    vez de arrastrar el grafo entero a memoria.
+
+    Al llegar al tope se deja de contar y se marca ``truncated``.
+    """
+    graph = getattr(rag, "chunk_entity_relation_graph", None)
+    if graph is None:
+        return {
+            "supported": False,
+            "reason": "El motor no expone almacenamiento de grafo",
+            "entities": 0,
+            "relations": 0,
+            "truncated": False,
+        }
+
+    async def _count(iterator_name: str) -> tuple[int, bool]:
+        iterator = getattr(graph, iterator_name, None)
+        if iterator is None:
+            raise StorageCapabilityError(f"{iterator_name} no disponible")
+        counted = 0
+        truncated = False
+        async for batch in iterator(GRAPH_ITER_BATCH):
+            counted += len(batch)
+            if counted >= cap:
+                truncated = True
+                break
+        return counted, truncated
+
+    try:
+        entities, entities_truncated = await _count("iter_labels")
+        relations, relations_truncated = await _count("iter_edges")
+    except StorageCapabilityError as exc:
+        return {
+            "supported": False,
+            "reason": str(exc),
+            "entities": 0,
+            "relations": 0,
+            "truncated": False,
+        }
+    except Exception as exc:
+        logger.warning("BIMNEMO: no se pudo contar el grafo: %s", exc)
+        return {
+            "supported": False,
+            "reason": str(exc),
+            "entities": 0,
+            "relations": 0,
+            "truncated": False,
+        }
+
+    return {
+        "supported": True,
+        "reason": None,
+        "entities": entities,
+        "relations": relations,
+        "truncated": entities_truncated or relations_truncated,
+        "cap": cap,
+    }
+
+
+def merge_files_with_memory(
+    snapshot: StorageSnapshot, documents: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Cruza los ficheros en disco con lo que el motor sabe de ellos.
+
+    El cruce es por **nombre de fichero**, que es lo que ``doc_status`` guarda
+    en ``file_path`` para lo subido por la API. Un fichero en disco que el motor
+    no conoce sale con ``status: null`` — está subido pero aún sin indexar, o se
+    borró de la memoria y quedó el fichero. Ambas cosas son útiles de ver.
+    """
+    # Se guarda la CLAVE junto al registro: el identificador del documento es
+    # la clave del diccionario, no un campo de `DocProcessingStatus` — ese
+    # dataclass no tiene `id`. Leerlo de ahí devolvía siempre `None`, y sin
+    # identificador la papelera de la tabla no podía borrar el índice: solo
+    # quitaba el fichero y dejaba las entidades en el grafo.
+    by_name: dict[str, Any] = {}
+    for doc_id, record in documents.items():
+        raw_path = getattr(record, "file_path", "") or ""
+        name = raw_path.replace("\\", "/").rsplit("/", 1)[-1]
+        if name:
+            by_name.setdefault(name, (doc_id, record))
+
+    rows: list[dict[str, Any]] = []
+    for stored in snapshot.files:
+        payload = stored.to_payload()
+        encontrado = by_name.get(stored.name)
+        if encontrado is None:
+            payload.update(
+                {
+                    "status": None,
+                    "chunks_count": None,
+                    "text_chars": None,
+                    "doc_id": None,
+                    "updated_at": None,
+                    "error_msg": None,
+                }
+            )
+        else:
+            doc_id, record = encontrado
+            payload.update(
+                {
+                    "status": getattr(record.status, "value", str(record.status)),
+                    "chunks_count": getattr(record, "chunks_count", None),
+                    "text_chars": getattr(record, "content_length", None),
+                    "doc_id": doc_id,
+                    "updated_at": getattr(record, "updated_at", None),
+                    "error_msg": getattr(record, "error_msg", None),
+                }
+            )
+        rows.append(payload)
+
+    rows.sort(key=lambda r: r["modified_at"], reverse=True)
+    return rows
+
+
+__all__ = [
+    "DEFAULT_GRAPH_COUNT_CAP",
+    "StorageSnapshot",
+    "StoredFile",
+    "graph_counts",
+    "merge_files_with_memory",
+    "scan_storage",
+    "summarize_memory",
+    "summarize_storage",
+]

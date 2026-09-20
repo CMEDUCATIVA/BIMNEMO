@@ -1,0 +1,98 @@
+/* ==========================================================================
+   BIMNEMO — Progreso de indexado y acciones de fila
+   --------------------------------------------------------------------------
+   Lo que aparece mientras el motor trabaja, y los botones de cada archivo.
+   Va en su propia hoja porque `views.css` llegaba a 611 líneas y porque esto
+   es otra cosa: no es la maqueta de una vista, es un estado del sistema que
+   puede aparecer en cualquiera.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Progreso de indexado, dentro de la columna de estado
+   No hay banner. La tabla ya tiene una columna que dice en qué anda cada
+   archivo; lo único que le faltaba era moverse. La barra va **debajo de la
+   etiqueta de esa fila**, fina, y solo mientras esa fila tenga trabajo.
+   -------------------------------------------------------------------------- */
+
+.estado-barra {
+  display: block;
+  margin-top: 0.3125rem;
+  /* Sin ancho propio: ocupa la celda, que es el ancho del que habla. */
+  max-width: 7.5rem;
+}
+
+.estado-barra__track {
+  display: block;
+  position: relative;
+  height: 0.1875rem;
+  border-radius: var(--radius-full);
+  background: var(--surface-tertiary);
+  overflow: hidden;
+}
+
+.estado-barra__fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: var(--radius-full);
+  background: var(--state-busy);
+  transition: width var(--duration-slow) var(--ease-oe);
+}
+
+/* La barra toma el color de su estado: en cola comparte el ámbar de la
+   etiqueta de encima, indexando el azul. Una barra azul bajo una etiqueta
+   ámbar parecen dos cosas distintas hablando del mismo archivo. */
+.estado-barra[data-estado='pending'] .estado-barra__fill { background: var(--state-warn); }
+.estado-barra[data-estado='deleting'] .estado-barra__fill { background: var(--content-quaternary); }
+
+/* En cola no sabemos cuánto falta, y un número inventado sería mentira: una
+   franja que recorre dice «vivo» sin prometer nada. */
+.estado-barra[data-modo='espera'] .estado-barra__fill {
+  width: 35%;
+  animation: recorre 1.5s var(--ease-oe) infinite;
+  transition: none;
+}
+
+@keyframes recorre {
+  0%   { transform: translateX(-120%); }
+  100% { transform: translateX(340%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .estado-barra[data-modo='espera'] .estado-barra__fill {
+    animation: none;
+    width: 100%;
+    opacity: 0.45;
+  }
+}
+
+/* Parado no es un error —el motor puede estar esperando turno— pero sí es
+   algo que mirar. El ámbar lo dice sin abrir un recuadro. */
+.estado-barra[data-modo='parado'] .estado-barra__fill {
+  background: var(--state-warn);
+  animation: none;
+  width: 100%;
+  opacity: 0.5;
+}
+
+.estado-barra__pct {
+  display: block;
+  margin-top: 0.1875rem;
+  font-size: var(--text-2xs);
+  line-height: 1.2;
+  color: var(--content-tertiary);
+}
+
+/* --- Columna de acciones de la tabla ------------------------------------- */
+
+.table__acciones { width: 1%; white-space: nowrap; text-align: right; }
+
+.acciones { display: inline-flex; gap: 0.25rem; }
+
+/* La papelera solo se tiñe de rojo al ir a por ella, igual que en la barra
+   superior: un icono rojo permanente en cada fila sería una tabla en alarma. */
+.acciones__borrar:hover {
+  background: var(--state-error-soft);
+  color: var(--state-error);
+  border-color: transparent;
+}

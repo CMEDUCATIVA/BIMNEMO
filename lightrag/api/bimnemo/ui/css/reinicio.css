@@ -1,0 +1,103 @@
+/* ==========================================================================
+   BIMNEMO — La cortina del reinicio
+   --------------------------------------------------------------------------
+   Ocupa la ventana entera a propósito: durante esos segundos no hay motor
+   detrás, y dejar la aplicación con aspecto de usable sería invitar a pulsar
+   botones que van a fallar.
+   ========================================================================== */
+
+.cortina {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--surface-base);
+  /* Un velo, no un muro: se sigue intuyendo la aplicación debajo, que es lo
+     que dice «esto es un momento, no otra pantalla». */
+  background: color-mix(in srgb, var(--surface-base) 92%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.cortina[hidden] { display: none; }
+
+/* Mientras está puesta, nada de scroll por detrás. */
+body.con-cortina { overflow: hidden; }
+
+.cortina__panel {
+  width: min(28rem, 100%);
+  padding: 2rem 1.75rem;
+  text-align: center;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.cortina__icon {
+  display: inline-flex;
+  color: var(--oe-blue);
+}
+
+/* Gira mientras hay espera. Se quieta al fallar, que es justo cuando seguir
+   girando engañaría. */
+.cortina__icon .icon { animation: cortina-gira 1.6s linear infinite; }
+.cortina__icon--fallo { color: var(--state-warn); }
+.cortina__icon--fallo .icon { animation: none; }
+
+@keyframes cortina-gira {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cortina__icon .icon { animation: none; }
+}
+
+.cortina__title {
+  margin: 0.875rem 0 0.375rem;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--content-primary);
+}
+
+.cortina__detail {
+  margin: 0 0 1.25rem;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--content-tertiary);
+}
+
+.cortina__track {
+  height: 0.375rem;
+  border-radius: var(--radius-full);
+  background: var(--surface-tertiary);
+  overflow: hidden;
+}
+
+.cortina__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--oe-blue);
+  transition: width var(--duration-slow) linear;
+}
+
+.cortina__meta {
+  margin: 0.75rem 0 0;
+  font-size: var(--text-xs);
+  color: var(--content-quaternary);
+}
+
+.cortina__sep { margin: 0 0.375rem; }
+
+.cortina__meta code {
+  padding: 0.0625rem 0.25rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-tertiary);
+  color: var(--content-secondary);
+}
+
+.cortina--fallo .cortina__panel { border-color: var(--state-warn); }
+.cortina--fallo .btn { margin-top: 1rem; }
