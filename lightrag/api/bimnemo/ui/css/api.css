@@ -191,3 +191,17 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
+
+/* Copiar la ruta de un endpoint: aparece al pasar por la fila. Visible
+   siempre sería una columna de iconos repetidos que no aporta nada. */
+.endpoint { position: relative; }
+
+.endpoint__copiar {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-oe);
+}
+
+.endpoint:hover .endpoint__copiar,
+.endpoint__copiar:focus-visible {
+  opacity: 1;
+}

@@ -289,6 +289,10 @@ async function start() {
     // qué existir en la nueva.
     guard(() => renderGrafo({ reset: true }));
     guard(reloadArchivos);
+    // La vista API habla de la memoria abierta: sus rutas, sus ejemplos y la
+    // instrucción que se copia llevan el identificador dentro. Dejarla sin
+    // repintar daría rutas de otra memoria, que es peor que no darlas.
+    if (current === 'api') guard(renderApi);
     // El estado de la tubería es por memoria: el banner de la anterior estaría
     // contando trabajo que no es de esta.
     guard(resetProgress);

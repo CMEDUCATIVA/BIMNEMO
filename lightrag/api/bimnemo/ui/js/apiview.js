@@ -14,6 +14,8 @@ import {
 } from './apiview-acceso.js';
 import { instruccionParaAgente } from './apiview-agente.js';
 import { mostrarDoc, ocultarDocs } from './apiview-docs.js';
+import { agruparPorAmbito, rutasDeMemoria } from './apiview-rutas.js';
+import { currentNemo, currentNemoName } from './nemo.js';
 import { icon } from './icons.js';
 import { escape } from './format.js';
 
@@ -24,12 +26,50 @@ function base() {
   return `${window.location.origin}${ROOT}`;
 }
 
-function endpointRow(item) {
+/**
+ * Una fila de endpoint, con la ruta **ya resuelta** para la memoria abierta y
+ * su botón de copiar.
+ *
+ * Lo que se copia lleva el servidor delante —`http://127.0.0.1:9621/nemo/…`—
+ * porque es lo que hace falta para pegarlo en una terminal o en una skill. Una
+ * ruta sin servidor obliga a componerla a mano, que es justo el trabajo que
+ * esta pestaña existe para ahorrar.
+ */
+function endpointRow(item, url) {
+  const completa = `${url}${item.ruta}`;
   return `
     <div class="endpoint">
       <span class="endpoint__method" data-method="${escape(item.method)}">${escape(item.method)}</span>
-      <span class="endpoint__path">${escape(item.path)}</span>
+      <span class="endpoint__path" data-ruta="${escape(completa)}">${escape(item.ruta)}</span>
       <span class="endpoint__purpose">${escape(item.purpose)}</span>
+      <button type="button" class="btn btn--ghost btn--icon endpoint__copiar"
+              data-copy-texto="${escape(completa)}"
+              title="Copiar la ruta completa" aria-label="Copiar la ruta completa">
+        ${icon('copy', 12)}
+      </button>
+    </div>`;
+}
+
+/** Un ámbito con su título y sus endpoints. */
+function ambitoCard(grupo, url, nemoNombre) {
+  const subtitulo =
+    grupo.clave === 'esta'
+      ? escape(nemoNombre)
+      : grupo.clave === 'todas'
+        ? 'Sin importar cuál esté abierta'
+        : 'LightRAG por debajo';
+
+  return `
+    <div class="card">
+      <div class="card__head">
+        <span class="card__title">${icon('plug', 14)}${escape(grupo.titulo)}</span>
+        <span class="card__hint">${subtitulo}</span>
+      </div>
+      <div class="card__body">
+        <div class="endpoints">
+          ${grupo.filas.map((f) => endpointRow(f, url)).join('')}
+        </div>
+      </div>
     </div>`;
 }
 
@@ -56,16 +96,16 @@ function claveEjemplo() {
   return getApiKey() || 'TU_CLAVE';
 }
 
-function curlExample(url, authenticated) {
+function curlExample(url, authenticated, buscar) {
   const auth = authenticated
     ? `\n  -H "X-API-Key: ${claveEjemplo()}" \\`
     : '';
-  return `curl -X POST "${url}/bimnemo/memory/search" \\${auth}
+  return `curl -X POST "${url}${buscar}" \\${auth}
   -H "Content-Type: application/json" \\
   -d '{"query": "¿Qué dicen los pliegos sobre plazos?", "mode": "mix"}'`;
 }
 
-function pythonExample(url, authenticated) {
+function pythonExample(url, authenticated, buscar, recordar) {
   const headers = authenticated
     ? `\n    headers={"X-API-Key": "${claveEjemplo()}"},`
     : '';
@@ -73,7 +113,7 @@ function pythonExample(url, authenticated) {
 
 # Recuperar contexto SIN gastar el LLM que redacta.
 respuesta = httpx.post(
-    "${url}/bimnemo/memory/search",${headers}
+    "${url}${buscar}",${headers}
     json={"query": "¿Qué dicen los pliegos sobre plazos?", "mode": "mix"},
     timeout=120,
 )
@@ -81,7 +121,7 @@ contexto = respuesta.json()["context"]
 
 # Guardar algo nuevo en la memoria.
 httpx.post(
-    "${url}/bimnemo/memory/remember",${headers}
+    "${url}${recordar}",${headers}
     json={"text": "El plazo de ejecución es de 180 días.", "source": "acta-2026-09"},
     timeout=60,
 )`;
@@ -269,6 +309,14 @@ export async function renderApi() {
     .toLowerCase()
     .includes('sin autenticación');
 
+  // Todo lo que se enseña aquí habla de LA MEMORIA ABIERTA: las rutas, los
+  // ejemplos y la instrucción del agente. Genéricas no se pueden pegar sin
+  // editarlas, y para la memoria por defecto ni eso: su identificador es la
+  // cadena vacía y `/nemo//…` responde 404.
+  const nemoId = currentNemo();
+  const nemoNombre = currentNemoName();
+  const rutas = rutasDeMemoria(manifest.endpoints, nemoId);
+
   body.innerHTML = `
     <div class="notice notice--info">
       <span class="notice__icon">${icon('info', 14)}</span>
@@ -295,17 +343,9 @@ export async function renderApi() {
       </div>
     </div>
 
-    <div class="card">
-      <div class="card__head">
-        <span class="card__title">${icon('plug', 14)}Endpoints de la memoria</span>
-        <span class="card__hint">${manifest.endpoints.length} rutas</span>
-      </div>
-      <div class="card__body">
-        <div class="endpoints">
-          ${manifest.endpoints.map(endpointRow).join('')}
-        </div>
-      </div>
-    </div>
+    ${agruparPorAmbito(manifest.endpoints, nemoId, manifest.ambitos || {})
+      .map((g) => ambitoCard(g, url, nemoNombre))
+      .join('')}
 
     <!-- Una sola columna, en el orden en que se usa esto: primero lo que se
          copia, luego la referencia, y al final lo que cambia algo.
@@ -314,12 +354,15 @@ export async function renderApi() {
          arriba, flotando al lado de los ejemplos. Cuando una columna tiene
          tres fichas y la otra una, no son dos columnas: es una lista con algo
          suelto al lado. -->
-    ${snippetCard('Ejemplo — curl', 'code', curlExample(url, authenticated), 'snippet-curl')}
-    ${snippetCard('Ejemplo — Python', 'code', pythonExample(url, authenticated), 'snippet-python')}
+    ${snippetCard('Ejemplo — curl', 'code', curlExample(url, authenticated, rutas.buscar), 'snippet-curl')}
+    ${snippetCard('Ejemplo — Python', 'code', pythonExample(url, authenticated, rutas.buscar, rutas.recordar), 'snippet-python')}
     ${snippetCard(
       'Instrucción para un agente',
       'message-square',
-      instruccionParaAgente(url, manifest, authenticated, claveEjemplo()),
+      instruccionParaAgente(url, manifest, authenticated, claveEjemplo(), {
+            id: nemoId,
+            nombre: nemoNombre,
+          }),
       'snippet-agent'
     )}
 
@@ -437,6 +480,13 @@ function wireCopy(root) {
   root.addEventListener('click', async (event) => {
     // Dos formas de copiar: el texto de un bloque, o el VALOR de un campo.
     // La clave vive en un `input`, y `textContent` de un input está vacío.
+    // Copiar un texto que ya está en el atributo: las rutas de los endpoints.
+    const suelto = event.target.closest('[data-copy-texto]');
+    if (suelto) {
+      await copiar(suelto.dataset.copyTexto, suelto);
+      return;
+    }
+
     const campo = event.target.closest('[data-copy-valor]');
     if (campo) {
       const entrada = document.getElementById(campo.dataset.copyValor);

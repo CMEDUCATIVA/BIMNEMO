@@ -48,6 +48,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "POST",
         "path": "/bimnemo/memory/search",
         "group": "consultar",
+        "scope": "esta",
         "purpose": (
             "Recuperar contexto de la memoria activa SIN generar respuesta. "
             "No gasta el LLM que redacta: es lo que quiere un agente que ya "
@@ -59,13 +60,19 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "POST",
         "path": "/nemo/{nemo}/memory/search",
         "group": "consultar",
-        "purpose": "Igual, pero en UNA memoria concreta. `{nemo}` es su identificador.",
+        "scope": "esta",
+        "purpose": (
+            "Recuperar contexto de esta memoria SIN generar respuesta. No "
+            "gasta el LLM que redacta: es lo que quiere un agente que ya tiene "
+            "su propio modelo."
+        ),
         "body": {"query": "<la pregunta>", "mode": "mix"},
     },
     {
         "method": "POST",
         "path": "/bimnemo/memory/search-all",
         "group": "consultar",
+        "scope": "todas",
         "purpose": (
             "Buscar en TODAS las memorias a la vez. Útil cuando no se sabe en "
             "cuál está la respuesta."
@@ -76,6 +83,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "POST",
         "path": "/bimnemo/memory/ask-all",
         "group": "consultar",
+        "scope": "todas",
         "purpose": "Preguntar a todas las memorias y que el motor redacte la respuesta.",
         "body": {"query": "<la pregunta>", "mode": "mix"},
     },
@@ -83,6 +91,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "POST",
         "path": "/query",
         "group": "consultar",
+        "scope": "motor",
         "purpose": "Pregunta y respuesta completa generada por el motor (gasta LLM).",
         "body": {"query": "<la pregunta>", "mode": "mix"},
     },
@@ -90,6 +99,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "POST",
         "path": "/query/stream",
         "group": "consultar",
+        "scope": "motor",
         "purpose": "Igual que /query, en streaming NDJSON.",
         "body": {"query": "<la pregunta>", "mode": "mix"},
     },
@@ -98,9 +108,10 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "GET",
         "path": "/bimnemo/nemos",
         "group": "explorar",
+        "scope": "todas",
         "purpose": (
-            "Qué memorias existen y cuál está activa. Se pide ANTES de usar "
-            "las rutas /nemo/{nemo}/…, para saber qué poner en {nemo}."
+            "Qué memorias existen, con el identificador de cada una. Se pide "
+            "para trabajar con una memoria distinta de la de estas rutas."
         ),
         "body": None,
     },
@@ -108,6 +119,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "GET",
         "path": "/bimnemo/stats",
         "group": "explorar",
+        "scope": "esta",
         "purpose": "Qué hay almacenado: archivos, tamaño, categorías, fragmentos.",
         "body": None,
     },
@@ -115,8 +127,9 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "GET",
         "path": "/bimnemo/files",
         "group": "explorar",
+        "scope": "esta",
         "purpose": (
-            "Los documentos de una memoria, con su estado y su doc_id. El "
+            "Los documentos de esta memoria, con su estado y su doc_id. El "
             "doc_id es lo que hace falta para borrar."
         ),
         "body": None,
@@ -125,6 +138,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "GET",
         "path": "/bimnemo/graph",
         "group": "explorar",
+        "scope": "esta",
         "purpose": "Entidades y relaciones del grafo. Acepta ?label=, ?max_depth=, ?max_nodes=.",
         "body": None,
     },
@@ -133,6 +147,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "POST",
         "path": "/bimnemo/memory/remember",
         "group": "guardar",
+        "scope": "esta",
         "purpose": "Guardar un texto en la memoria activa. Se indexa como un documento más.",
         "body": {"text": "<lo que hay que recordar>", "source": "<de dónde sale>"},
     },
@@ -140,15 +155,19 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "POST",
         "path": "/nemo/{nemo}/memory/remember",
         "group": "guardar",
-        "purpose": "Igual, en una memoria concreta.",
+        "scope": "esta",
+        "purpose": (
+            "Guardar un texto en esta memoria. Se indexa como un documento más."
+        ),
         "body": {"text": "<lo que hay que recordar>", "source": "<de dónde sale>"},
     },
     {
         "method": "POST",
         "path": "/nemo/{nemo}/documents/upload",
         "group": "guardar",
+        "scope": "esta",
         "purpose": (
-            "Subir un fichero a una memoria. multipart/form-data con el campo "
+            "Subir un fichero a esta memoria. multipart/form-data con el campo "
             "`file`. Admite 41 formatos."
         ),
         "body": None,
@@ -158,8 +177,9 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "DELETE",
         "path": "/bimnemo/documents",
         "group": "borrar",
+        "scope": "esta",
         "purpose": (
-            "Borrar documentos de una memoria CON lo que el motor aprendió de "
+            "Borrar documentos de esta memoria CON lo que el motor aprendió de "
             "ellos: sus fragmentos y sus entidades. No se puede deshacer."
         ),
         "body": {"doc_ids": ["<doc_id>"], "delete_file": True},
@@ -168,10 +188,23 @@ ENDPOINTS: list[dict[str, Any]] = [
         "method": "DELETE",
         "path": "/bimnemo/files",
         "group": "borrar",
+        "scope": "esta",
         "purpose": "Borrar un archivo que todavía no llegó a indexarse. No afecta al grafo.",
         "body": None,
     },
 ]
+
+#: Sobre qué actúa cada endpoint. Es el eje que ORDENA la vista, porque es lo
+#: que hay que decidir al copiar una ruta: ¿esto toca la memoria que tengo
+#: abierta, todas, o el motor?
+#:
+#: El grupo —consultar, guardar, borrar— se queda como etiqueta dentro de cada
+#: ámbito: sigue siendo lo que le dice a un agente qué se le está permitiendo.
+AMBITOS: dict[str, str] = {
+    "esta": "Esta memoria",
+    "todas": "Todas las memorias",
+    "motor": "El motor",
+}
 
 #: Qué significa cada grupo, para quien lea la instrucción.
 GRUPOS: dict[str, str] = {

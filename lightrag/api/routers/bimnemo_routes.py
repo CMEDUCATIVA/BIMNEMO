@@ -39,7 +39,7 @@ from lightrag.api.bimnemo.stats import (
     summarize_storage,
 )
 from lightrag.base import DocStatus, QueryParam
-from lightrag.api.bimnemo.manifiesto import ENDPOINTS, GRUPOS, MODOS
+from lightrag.api.bimnemo.manifiesto import AMBITOS, ENDPOINTS, GRUPOS, MODOS
 from lightrag.utils import logger
 
 from ..utils_api import get_combined_auth_dependency, internal_server_error
@@ -469,6 +469,7 @@ def create_bimnemo_routes(
             # también escrito por qué NO están las 32 rutas del servidor.
             "endpoints": ENDPOINTS,
             "groups": GRUPOS,
+            "ambitos": AMBITOS,
             "retrieval_modes": MODOS,
             "openapi": "/openapi.json",
             "swagger": "/docs",

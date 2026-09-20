@@ -1,57 +1,60 @@
 /* ==========================================================================
    BIMNEMO — La instrucción que se pega en una IA
    --------------------------------------------------------------------------
-   Es el bloque que el usuario copia en su skill. Antes estaba escrito a mano
-   y enseñaba **un** endpoint de los muchos que hay; peor, no decía nada de
-   las memorias, así que una IA que lo leyera no podía elegir entre «General»
-   y «Obra Sur» — que es de lo que va la aplicación entera.
+   Es el bloque que el usuario copia en su skill.
+
+   ## Habla de LA MEMORIA QUE TIENE ABIERTA
+
+   Antes traía plantillas: `/nemo/{nemo}/memory/search`. Quien la pegaba tenía
+   que saber que `{nemo}` es un identificador y no el nombre, averiguar cuál
+   —«Obra Sur» es `Obra_Sur`— y sustituirlo línea por línea. Y para la memoria
+   por defecto **no había sustitución posible**: su identificador es la cadena
+   vacía y `/nemo//…` responde 404.
+
+   Ahora las rutas vienen resueltas. Se pega y funciona.
 
    ## Se genera del manifiesto, no se escribe aparte
 
    Si fueran dos listas acabarían discrepando, y la que discreparía sin que
    nadie lo notase es justo ésta: la que se pega y se olvida dentro de una
-   skill. Una sola fuente, `bimnemo/manifiesto.py`.
+   skill.
 
-   ## Cabe, y se lee
+   ## Agrupado por lo que permite
 
    Lo lee un modelo con contexto limitado y lo revisa una persona. Por eso va
-   **agrupado por lo que permite** —leer, explorar, guardar, borrar—, con el
-   cuerpo mínimo de cada llamada y nada más. El cuerpo importa: saber que
-   existe `/nemo/{nemo}/memory/remember` no dice qué hay que mandarle, y ese
-   era justo el trabajo que obligaba a ir a Swagger.
+   por ámbito —esta memoria, todas, el motor— con el cuerpo mínimo de cada
+   llamada. El cuerpo importa: saber que existe `remember` no dice **qué**
+   mandarle, y ése era el trabajo que obligaba a ir a Swagger.
    ========================================================================== */
 
-/** En qué orden se leen bien los grupos. */
-const ORDEN = ['consultar', 'explorar', 'guardar', 'borrar'];
+import { agruparPorAmbito } from './apiview-rutas.js';
 
 /** Cuerpo de ejemplo en una línea, si lo lleva. */
 function cuerpo(ep) {
   return ep.body ? `\n      ${JSON.stringify(ep.body)}` : '';
 }
 
-function bloqueDeGrupo(grupo, titulo, endpoints) {
-  const suyos = endpoints.filter((e) => e.group === grupo);
-  if (!suyos.length) return '';
-
-  const lineas = suyos
-    .map((e) => `  ${e.method} ${e.path}\n      ${e.purpose}${cuerpo(e)}`)
+function bloque(titulo, filas) {
+  if (!filas.length) return '';
+  const lineas = filas
+    .map((e) => `  ${e.method} ${e.ruta}\n      ${e.purpose}${cuerpo(e)}`)
     .join('\n\n');
-
   return `\n${titulo.toUpperCase()}\n\n${lineas}\n`;
 }
 
 /**
  * La instrucción completa, lista para pegar.
  *
- * @param {string} url         Dirección de esta memoria.
+ * @param {string} url         Dirección del servidor.
  * @param {object} manifest    Lo que devuelve `/bimnemo/memory/manifest`.
  * @param {boolean} protegida  Si la API pide clave.
  * @param {string} clave       La clave, cuando la haya.
+ * @param {{id: string, nombre: string}} nemo  La memoria abierta.
  */
-export function instruccionParaAgente(url, manifest, protegida, clave) {
-  const endpoints = manifest.endpoints || [];
-  const grupos = manifest.groups || {};
+export function instruccionParaAgente(url, manifest, protegida, clave, nemo) {
+  const ambitos = manifest.ambitos || {};
   const modos = manifest.retrieval_modes || {};
+  const grupos = agruparPorAmbito(manifest.endpoints || [], nemo.id, ambitos);
 
   // La cabecera va arriba del todo: si falta, ninguna de las llamadas de abajo
   // funciona, y un 401 sin explicación es lo peor que le puede pasar a un
@@ -60,28 +63,26 @@ export function instruccionParaAgente(url, manifest, protegida, clave) {
     ? `\nTODAS las llamadas necesitan esta cabecera:\n\n  X-API-Key: ${clave}\n`
     : '\nEsta memoria no pide credencial.\n';
 
-  const cuerpoGrupos = ORDEN.map((g) =>
-    bloqueDeGrupo(g, grupos[g] || g, endpoints),
-  ).join('');
+  const cuerpoGrupos = grupos
+    .map((g) => bloque(rotulo(g, nemo), g.filas))
+    .join('');
 
   const listaModos = Object.entries(modos)
     .map(([nombre, para]) => `  ${nombre.padEnd(8)}${para}`)
     .join('\n');
 
-  const puedeBorrar = endpoints.some((e) => e.group === 'borrar');
+  const puedeBorrar = grupos.some((g) => g.filas.some((f) => f.group === 'borrar'));
 
   return `Tienes acceso a BIMNEMO, una memoria de conocimiento con grafo que
 corre en ${url}.
 
+Estas instrucciones son para la memoria «${nemo.nombre}». Las rutas de abajo
+ya apuntan a ella: úsalas tal cual, sin sustituir nada.
+
 Antes de responder cualquier pregunta sobre los documentos del proyecto,
 consulta la memoria en vez de improvisar. Usa el campo "context" de la
 respuesta como tu fuente; si viene vacío, dilo.
-${acceso}
-BIMNEMO guarda VARIAS memorias separadas. Pide primero
-GET /bimnemo/nemos para saber cuáles hay y cuál está activa. Las rutas
-/bimnemo/… trabajan sobre la activa; las /nemo/{nemo}/… sobre la que
-indiques.
-${cuerpoGrupos}
+${acceso}${cuerpoGrupos}
 MODOS DE RECUPERACIÓN (el campo "mode")
 
 ${listaModos}
@@ -96,6 +97,25 @@ CUIDADO CON EL BORRADO
 `
     : ''
 }
+OTRAS MEMORIAS
+
+  BIMNEMO guarda varias memorias separadas. Estas instrucciones son de
+  «${nemo.nombre}». Para trabajar con otra, pide GET ${url}/bimnemo/nemos,
+  que devuelve el identificador de cada una, y úsalo en lugar de
+  ${nemo.id ? `"${nemo.id}"` : 'omitir el parámetro'}.
+
 El descriptor completo, siempre al día, está en
 ${url}/bimnemo/memory/manifest`;
+}
+
+/**
+ * El rótulo de un ámbito dentro de la instrucción.
+ *
+ * El de «esta memoria» lleva el nombre: un agente que lee «ESTA MEMORIA» sin
+ * saber cuál es no tiene forma de comprobar que está donde debe.
+ */
+function rotulo(grupo, nemo) {
+  return grupo.clave === 'esta'
+    ? `${grupo.titulo} — ${nemo.nombre}`
+    : grupo.titulo;
 }
