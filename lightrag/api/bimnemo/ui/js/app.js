@@ -4,7 +4,11 @@
    Es el único fichero que conoce todas las vistas; ninguna conoce a las otras.
    ========================================================================== */
 
-import { getAppBuild, getHealth } from './api.js';
+import {
+  getEngine,
+  getAppBuild,
+  getHealth,
+} from './api.js';
 import { icon } from './icons.js';
 import { mountActualizar } from './actualizar.js';
 import { mountDialogo, preguntar } from './dialogo.js';
@@ -27,7 +31,13 @@ import {
   mountConfiguracion,
   renderConfiguracion,
 } from './configuracion.js';
-import { loadNemos, mountNemo, onNemoChange, selectNemo } from './nemo.js';
+import {
+  currentNemo,
+  loadNemos,
+  mountNemo,
+  onNemoChange,
+  selectNemo,
+} from './nemo.js';
 import { renderMotor } from './motor.js';
 import { renderApi } from './apiview.js';
 
@@ -171,6 +181,33 @@ async function refreshEngineState() {
   }
 }
 
+/**
+ * La versión, al final del carril.
+ *
+ * Es lo primero que hace falta al pedir soporte —«¿qué versión tienes?»— y no
+ * estaba a la vista en ninguna parte: había que abrir la pestaña Motor.
+ *
+ * Lleva también el commit instalado en el título emergente, porque entre dos
+ * versiones hay commits y saber cuál se está ejecutando es lo que distingue
+ * «ya lo arreglamos» de «lo arreglamos después de tu copia».
+ */
+async function pintarVersion() {
+  const hueco = document.getElementById('rail-version');
+  if (!hueco) return;
+  try {
+    const motor = await getEngine(currentNemo());
+    const p = motor.product || {};
+    hueco.textContent = `${p.name || 'BIMNEMO'} ${p.version || ''}`.trim();
+    hueco.title = p.build
+      ? `${p.name} ${p.version} · ${p.build} — motor ${p.engine} ${p.engine_version}`
+      : `motor ${p.engine} ${p.engine_version}`;
+  } catch {
+    // Sin motor no hay versión que enseñar, y un «desconocida» en el pie del
+    // carril no ayuda a nadie: se deja vacío.
+    hueco.textContent = '';
+  }
+}
+
 /* --- Versión de la interfaz ----------------------------------------------- */
 
 // Huella de los ficheros de interfaz con la que arrancó ESTA ventana. Si la
@@ -306,6 +343,7 @@ async function start() {
   // están puestas.
   guard(() => renderGrafo({ reset: true }));
   await refreshEngineState();
+  await guard(pintarVersion);
   await checkBuild();
 
   // Se vuelve a mirar cada minuto. No hace falta más: quien actualiza BIMNEMO

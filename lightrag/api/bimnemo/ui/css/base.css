@@ -365,3 +365,24 @@ code, pre {
   .view__header { padding-top: 0.875rem; padding-bottom: 0.625rem; }
   .view__subtitle { display: none; }
 }
+
+/* --------------------------------------------------------------------------
+   Pie del carril: qué versión estás usando
+   Pegado abajo con `margin-top: auto`, no con posicionamiento: así respeta el
+   desplazamiento del carril en ventanas bajas en vez de taparle el contenido.
+   -------------------------------------------------------------------------- */
+
+.rail__pie {
+  margin-top: auto;
+  padding: 0.625rem 0.75rem;
+  border-top: 1px solid var(--border-light);
+  font-size: var(--text-2xs);
+  color: var(--content-quaternary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sin versión que enseñar no deja un filo suelto. */
+.rail__pie:empty { display: none; }
