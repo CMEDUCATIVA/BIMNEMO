@@ -33,7 +33,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from lightrag.api.bimnemo.nemo_registry import NemoError, NemoRegistry
@@ -196,6 +196,53 @@ def create_nemo_routes(
             code = 404 if "No existe" in str(exc) else 409
             raise HTTPException(status_code=code, detail=str(exc)) from exc
         return _as_model(nemo, manager.live_ids())
+
+    @router.patch(
+        "/bimnemo/nemos",
+        response_model=NemoModel,
+        dependencies=[Depends(combined_auth)],
+        summary="Renombrar una memoria, indicándola por parámetro",
+    )
+    async def rename_nemo_por_parametro(
+        request: RenameNemoRequest,
+        nemo: str = Query(
+            default="",
+            description=(
+                "Identificador de la memoria. Vacío o ausente: la de por defecto."
+            ),
+        ),
+    ) -> NemoModel:
+        """Igual que la ruta con el identificador en el camino, pero por parámetro.
+
+        Existe porque **la memoria por defecto tiene el identificador vacío**
+        —es el espacio de trabajo sin nombre de LightRAG— y una cadena vacía no
+        cabe en una ruta: ``/bimnemo/nemos/`` responde 307 y ``/bimnemo/nemos``
+        405. Sin esto, la única memoria que todo el mundo tiene es la única que
+        no se puede renombrar.
+
+        Además es como funciona **todo lo demás** en BIMNEMO: la memoria se
+        indica con ``?nemo=``, y omitirlo significa la de por defecto. La ruta
+        con el identificador en el camino era la excepción; se mantiene por si
+        algo la usa.
+        """
+        return await rename_nemo(nemo, request)
+
+    @router.post(
+        "/bimnemo/nemos/default",
+        response_model=NemoListResponse,
+        dependencies=[Depends(combined_auth)],
+        summary="Fijar la memoria por defecto, indicándola por parámetro",
+    )
+    async def set_default_por_parametro(
+        nemo: str = Query(
+            default="",
+            description=(
+                "Identificador de la memoria. Vacío o ausente: la de por defecto."
+            ),
+        ),
+    ) -> NemoListResponse:
+        """Mismo motivo que arriba: un identificador vacío no cabe en una ruta."""
+        return await set_default_nemo(nemo)
 
     @router.post(
         "/bimnemo/nemos/{nemo_id}/default",

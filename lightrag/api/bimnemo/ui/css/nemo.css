@@ -228,3 +228,51 @@
   color: var(--state-error);
   min-height: 1rem;
 }
+
+/* --------------------------------------------------------------------------
+   Diálogo de renombrado
+   No lleva el filo rojo del de borrado a propósito: renombrar no destruye
+   nada, y teñir de alarma algo reversible gasta una señal que hace falta
+   para lo que sí lo es.
+   -------------------------------------------------------------------------- */
+
+/* Casilla con su rótulo, pulsable entera. */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--text-sm);
+  color: var(--content-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.check input {
+  width: 0.9375rem;
+  height: 0.9375rem;
+  margin: 0;
+  flex: none;
+  accent-color: var(--oe-blue);
+  cursor: pointer;
+}
+
+/* Deshabilitada cuando ya es la de por defecto: quitarle la marca no es una
+   operación que exista, así que no se ofrece. */
+.check input:disabled,
+.check input:disabled + span {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* El error va bajo el campo, que es donde se está mirando al escribir. */
+.field__help--error:not(:empty) {
+  color: var(--state-error);
+  font-weight: 500;
+}
+
+.dialog__nota {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--content-tertiary);
+}

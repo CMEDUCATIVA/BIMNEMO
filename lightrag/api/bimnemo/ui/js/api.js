@@ -173,6 +173,21 @@ export const listNemos = () => request('/bimnemo/nemos');
 export const getNemosStats = () => request('/bimnemo/nemos/stats');
 export const createNemo = (name) => postJson('/bimnemo/nemos', { name });
 
+/**
+ * Cambia el nombre visible de una memoria. No mueve datos: el identificador y
+ * la carpeta se quedan como estaban.
+ *
+ * Se indica con `?nemo=` y no en el camino porque **la memoria por defecto
+ * tiene el identificador vacío**, y una cadena vacía no cabe en una ruta
+ * (`/bimnemo/nemos/` responde 307). Además es como funciona todo lo demás.
+ */
+export const renameNemo = (nemoId, name) =>
+  send('PATCH', `/bimnemo/nemos${forNemo(nemoId)}`, { name });
+
+/** Fija cuál es la memoria por defecto. Mismo motivo para el parámetro. */
+export const setDefaultNemo = (nemoId) =>
+  postJson(`/bimnemo/nemos/default${forNemo(nemoId)}`, {});
+
 export const deleteNemo = (nemoId, confirmName, purgeFiles) =>
   request(`/bimnemo/nemos/${encodeURIComponent(nemoId)}`, {
     method: 'DELETE',
@@ -187,13 +202,6 @@ export const getSettings = () => request('/bimnemo/settings');
 export const saveSettings = (payload) => postJson('/bimnemo/settings', payload);
 export const restartEngine = () => postJson('/bimnemo/restart', {});
 
-/**
- * Exige —o deja de exigir— una clave para usar la API.
- *
- * Escribe `LIGHTRAG_API_KEY` en el `.env`; no cambia nada en caliente, porque
- * el guardia de las rutas se construye al arrancar. La respuesta pide
- * reinicio.
- */
 /** ¿Hay una versión nueva publicada? */
 export const getUpdateStatus = (force = false) =>
   request(`/bimnemo/update${force ? '?force=true' : ''}`);
@@ -204,6 +212,13 @@ export const applyUpdate = (discardLocalChanges = false) =>
     discard_local_changes: discardLocalChanges,
   });
 
+/**
+ * Exige —o deja de exigir— una clave para usar la API.
+ *
+ * Escribe `LIGHTRAG_API_KEY` en el `.env`; no cambia nada en caliente, porque
+ * el guardia de las rutas se construye al arrancar. La respuesta pide
+ * reinicio.
+ */
 export const setAccess = (enabled, key) =>
   postJson('/bimnemo/access', { enabled, key: key || null });
 

@@ -33,6 +33,10 @@
         </span>
         <button type="button" class="btn btn--primary btn--icon" id="btn-nemo-new"
                 title="Crear una memoria nueva" aria-label="Crear una memoria nueva"></button>
+        <button type="button" class="btn btn--ghost btn--icon" id="btn-nemo-rename"
+                title="Renombrar la memoria activa"
+                aria-label="Renombrar la memoria activa"
+                data-icon="pencil" data-icon-size="13"></button>
         <button type="button" class="btn btn--ghost btn--icon" id="btn-nemo-delete"
                 title="Borrar la memoria activa" aria-label="Borrar la memoria activa"
                 data-icon="trash-2" data-icon-size="13"></button>
@@ -493,6 +497,44 @@
        El cuadro nativo de Chrome no se puede ajustar, no admite formato y se
        ve como una alerta del sistema encima de la aplicación. Éste explica
        qué se pierde y exige escribir el nombre, que es el resguardo real. -->
+  <!-- Renombrar no destruye nada, así que este diálogo NO pide confirmación
+       escrita como el de borrado: exigirla para algo reversible enseña a
+       confirmar sin leer, y entonces la del borrado deja de servir. -->
+  <dialog class="dialog" id="nemo-rename-dialog">
+    <form method="dialog" class="dialog__form" id="nemo-rename-form">
+      <h2 class="dialog__title">
+        <span class="dialog__mark" data-icon="pencil" data-icon-size="15"></span>
+        <span>Renombrar memoria</span>
+      </h2>
+
+      <div class="field">
+        <label class="field__label" for="nemo-rename-name">Nombre</label>
+        <input class="input" id="nemo-rename-name" type="text" maxlength="60"
+               autocomplete="off" spellcheck="false">
+        <span class="field__help" id="nemo-rename-count"></span>
+        <span class="field__help field__help--error" id="nemo-rename-error"
+              role="alert"></span>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="nemo-rename-default">
+        <span>Usar como memoria por defecto</span>
+      </label>
+
+      <p class="dialog__nota">
+        Cambiar el nombre no mueve nada: tus documentos y lo que el motor
+        aprendió de ellos se quedan donde están.
+      </p>
+
+      <div class="dialog__actions">
+        <button type="button" class="btn" id="nemo-rename-cancel">Cancelar</button>
+        <button type="submit" class="btn btn--primary" id="nemo-rename-confirm" disabled>
+          Guardar
+        </button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="dialog dialog--peligro" id="nemo-delete-dialog">
     <form method="dialog" class="dialog__form" id="nemo-delete-form">
       <h2 class="dialog__title">

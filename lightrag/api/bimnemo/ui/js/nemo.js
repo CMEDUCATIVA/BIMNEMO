@@ -12,6 +12,7 @@
 
 import { createNemo, listNemos } from './api.js';
 import { abrirBorrado, mountBorrado } from './nemo-borrar.js';
+import { abrirRenombrado, mountRenombrado } from './nemo-renombrar.js';
 import { icon } from './icons.js';
 import { bytes, escape } from './format.js';
 
@@ -103,12 +104,19 @@ export function renderSelector() {
   const host = document.getElementById('nemo-selector');
   if (!host) return;
 
+  // El punto marca la memoria por defecto. Se veía y no lo explicaba nadie,
+  // así que la opción lleva su título.
   host.innerHTML = state.nemos
-    .map(
-      (n) =>
-        `<option value="${escape(n.id)}"${n.id === state.current ? ' selected' : ''}>` +
-        `${escape(n.name)}${n.id === state.default ? ' ·' : ''}</option>`
-    )
+    .map((n) => {
+      const esDefecto = n.id === state.default;
+      const titulo = esDefecto
+        ? ' title="· Es la memoria por defecto: la que se abre al arrancar"'
+        : '';
+      return (
+        `<option value="${escape(n.id)}"${n.id === state.current ? ' selected' : ''}${titulo}>` +
+        `${escape(n.name)}${esDefecto ? ' ·' : ''}</option>`
+      );
+    })
     .join('');
 }
 
@@ -172,6 +180,24 @@ function borrarActual() {
   });
 }
 
+/**
+ * Abre el diálogo de renombrado para la memoria activa.
+ *
+ * Al terminar basta con recargar la lista: **el identificador no cambia al
+ * renombrar**, así que la memoria abierta sigue siendo la misma y no hay que
+ * reseleccionar nada. Solo cambia el rótulo.
+ */
+function renombrarActual() {
+  const nemo = state.nemos.find((n) => n.id === state.current);
+  if (!nemo) return;
+  abrirRenombrado(
+    { id: nemo.id, name: nemo.name, esDefecto: nemo.id === state.default },
+    async () => {
+      await loadNemos();
+    }
+  );
+}
+
 /* --- Tarjeta del panel ---------------------------------------------------- */
 
 /**
@@ -223,8 +249,12 @@ export function mountNemo() {
     selectNemo(event.target.value);
   });
   document.getElementById('btn-nemo-new').addEventListener('click', abrirCrear);
+  document
+    .getElementById('btn-nemo-rename')
+    .addEventListener('click', renombrarActual);
   document.getElementById('btn-nemo-delete').addEventListener('click', borrarActual);
   mountBorrado();
+  mountRenombrado();
   document.getElementById('nemo-dialog-form').addEventListener('submit', confirmarCrear);
   document
     .getElementById('nemo-dialog-cancel')
