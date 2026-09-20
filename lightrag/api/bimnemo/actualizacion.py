@@ -125,16 +125,70 @@ def ultimo_publicado(forzar: bool = False) -> Optional[dict[str, Any]]:
     return dato
 
 
-def estado(forzar: bool = False) -> dict[str, Any]:
-    """Qué versión hay instalada, cuál es la última, y si hace falta actualizar."""
-    if not es_repositorio():
+def estrategia() -> str:
+    """Cómo puede actualizarse ESTA instalación.
+
+    Dos formas de contestar la misma pregunta —«¿estoy al día?»—, elegidas por
+    lo que de verdad hay en el disco:
+
+    - ``"git"``: hay `.git` y git funciona. Es la copia de quien desarrolla.
+    - ``"release"``: lo demás. Es lo que instala un cliente con el instalador
+      de Windows, que no tiene `.git` —16 MB de historia que no le sirve— ni
+      `git.exe`, que es una herramienta de programador.
+
+    La pantalla no se entera de cuál es: mismo botón, misma cortina, mismos
+    endpoints. Lo que cambia es de dónde sale la información y cómo llegan los
+    ficheros.
+    """
+    return "git" if es_repositorio() else "release"
+
+
+def _estado_release(forzar: bool = False) -> dict[str, Any]:
+    """Estado comparando contra las versiones publicadas de GitHub."""
+    from lightrag.api.bimnemo import paquete
+
+    instalada = paquete.version_instalada(raiz())
+    if not instalada:
         return {
             "supported": False,
             "reason": (
-                "BIMNEMO no está instalado desde git, así que no puede "
-                "actualizarse solo."
+                "Esta instalación no dice qué versión tiene, así que no puede "
+                "saber si hay una más nueva."
             ),
         }
+
+    ultima = paquete.ultima_version(REPO)
+    if ultima is None:
+        return {
+            "supported": True,
+            "reachable": False,
+            "installed": instalada,
+            "behind": False,
+            "reason": "No se pudo consultar GitHub.",
+        }
+
+    etiqueta = ultima.get("tag_name") or ""
+    return {
+        "supported": True,
+        "reachable": True,
+        "strategy": "release",
+        "installed": instalada,
+        "latest": etiqueta,
+        "behind": bool(etiqueta and etiqueta != instalada),
+        # Un cliente no edita el código, así que no hay cambios locales que
+        # respetar. Y si los hubiera, el despliegue los sobrescribe sin más:
+        # avisar de algo que el usuario no ha hecho sería ruido.
+        "dirty": False,
+        "message": (ultima.get("name") or etiqueta)[:200],
+        "date": ultima.get("published_at"),
+        "repo": REPO,
+    }
+
+
+def estado(forzar: bool = False) -> dict[str, Any]:
+    """Qué versión hay instalada, cuál es la última, y si hace falta actualizar."""
+    if estrategia() == "release":
+        return _estado_release(forzar)
 
     instalado = commit_instalado()
     remoto = ultimo_publicado(forzar=forzar)
@@ -172,6 +226,16 @@ def aplicar(descartar_cambios: bool = False) -> dict[str, Any]:
 
     Devuelve qué se hizo, para poder contarlo.
     """
+    if estrategia() == "release":
+        from lightrag.api.bimnemo import paquete
+
+        antes = paquete.leer_pyproject(raiz())
+        resultado = paquete.traer(REPO, raiz())
+        if not resultado.get("ok"):
+            return resultado
+        resultado["dependencies_changed"] = paquete.pyproject_cambio(raiz(), antes)
+        return resultado
+
     if hay_cambios_locales() and not descartar_cambios:
         return {
             "ok": False,
@@ -207,11 +271,11 @@ def aplicar(descartar_cambios: bool = False) -> dict[str, Any]:
 
 def instalar_dependencias() -> tuple[bool, str]:
     """``pip install -e .[api]``, solo cuando cambió ``pyproject.toml``."""
-    import sys
+    from lightrag.api.bimnemo import paquete
 
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-e", ".[api]"],
+            [paquete.python_del_entorno(raiz()), "-m", "pip", "install", "-e", ".[api]"],
             cwd=str(raiz()),
             capture_output=True,
             text=True,

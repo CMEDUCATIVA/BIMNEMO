@@ -138,6 +138,60 @@ git push origin v1.2.0
 
 ---
 
+## Construir el instalador de Windows
+
+Los clientes no instalan con git: instalan con un `.exe`. Ese instalador lleva
+el programa **y su entorno virtual**, así que no tienen que instalar Python ni
+127 paquetes.
+
+```bat
+scripts\release\construir_instalador.bat v1.2.0
+```
+
+Hace dos cosas:
+
+1. `empaquetar.py` copia a `installer\salida\app` lo que git versiona —así la
+   lista de lo que se publica es **la misma** que decide `.gitignore`— más el
+   `.venv`, y escribe el fichero `VERSION`.
+2. Inno Setup comprime todo en
+   `installer\salida\BIMNEMO-<version>-instalador.exe`.
+
+Medido con la v1.0.1: **292 MB sin comprimir, 69 MB de instalador.**
+
+Hace falta [Inno Setup 6](https://jrsoftware.org/isdl.php) instalado.
+
+### Cómo se actualizan los clientes
+
+**No por git.** Su instalación no tiene `.git` —16 MB de historia que no les
+sirve— ni `git.exe`, que es una herramienta de programador.
+
+BIMNEMO elige la estrategia sola:
+
+| Si hay… | Compara | Trae los ficheros con |
+|---|---|---|
+| `.git` y git funciona | commits contra `origin/main` | `git reset --hard` |
+| lo demás | el `VERSION` contra `/releases/latest` | el zipball de la versión |
+
+Mismo botón, misma cortina. Por eso **etiquetar importa**: sin una versión
+publicada, un cliente instalado no tiene contra qué compararse y su botón de
+actualizar se oculta.
+
+> **Publica el instalador como adjunto de la versión.** En GitHub → Releases →
+> edita la versión → *Attach binaries*. El zipball sirve para actualizar, pero
+> alguien que instala por primera vez necesita el `.exe`.
+
+### Lo que una actualización nunca toca
+
+`.env`, `inputs/`, `rag_storage/` y `.venv/`. No hace falta excluirlos: **no
+están en el paquete**, porque el paquete es lo que git versiona. Una lista de
+exclusiones es algo que alguien olvida actualizar.
+
+**Límite conocido:** un fichero borrado en la versión nueva se queda en el
+disco del cliente. No estorba —nadie lo importa— y borrar por diferencia es
+donde estos actualizadores se cargan instalaciones.
+
+---
+
 ## Credenciales
 
 Para subir hace falta un token de GitHub con permiso `repo`.

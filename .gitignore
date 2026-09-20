@@ -58,6 +58,10 @@ temp/
 local_neo4jWorkDir/
 neo4jWorkDir/
 
+# Salida del empaquetado para el instalador: se genera, no se versiona.
+/installer/salida/
+/installer/BIMNEMO-*.exe
+
 # Data & Storage
 inputs/
 output/
