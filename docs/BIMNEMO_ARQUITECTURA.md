@@ -2,7 +2,7 @@
 
 Para quien vaya a mantener o ampliar BIMNEMO. Si lo que quieres es usarlo,
 mira [`BIMNEMO_INSTALAR.md`](BIMNEMO_INSTALAR.md); si publicarlo,
-[`BIMNEMO_PUBLICAR.md`](BIMNEMO_PUBLICAR.md).
+[`como_actualizar_bimnemo.md`](../como_actualizar_bimnemo.md).
 
 ---
 

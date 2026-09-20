@@ -11,7 +11,7 @@
 > | **Instalarlo y empezar** | [`docs/BIMNEMO_INSTALAR.md`](docs/BIMNEMO_INSTALAR.md) |
 > | **Actualizarlo** | [`como_actualizar.md`](como_actualizar.md) |
 > | Entender cómo está hecho | [`docs/BIMNEMO_ARQUITECTURA.md`](docs/BIMNEMO_ARQUITECTURA.md) |
-> | Publicar una versión | [`docs/BIMNEMO_PUBLICAR.md`](docs/BIMNEMO_PUBLICAR.md) |
+> | Mantenerlo: subir, etiquetar, generar el .exe | [`como_actualizar_bimnemo.md`](como_actualizar_bimnemo.md) |
 >
 > **Descarga el instalador de Windows** en
 > [Releases](https://github.com/CMEDUCATIVA/BIMNEMO/releases). No hace falta

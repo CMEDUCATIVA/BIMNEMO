@@ -123,3 +123,9 @@ git stash pop
 ```
 
 Después, **Motor → Reiniciar motor LightRAG**.
+
+---
+
+¿Eres quien **publica** BIMNEMO, no quien lo recibe? El ciclo completo —subir,
+etiquetar y generar el instalador— está en
+[`como_actualizar_bimnemo.md`](como_actualizar_bimnemo.md).
