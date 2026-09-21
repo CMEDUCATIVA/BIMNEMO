@@ -353,8 +353,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--nativo",
         action="store_true",
-        help="Abre la ventana nativa (en construcción) en vez de la de "
-        "navegador.",
+        # Ya es lo normal. Se sigue aceptando para no romper los accesos
+        # directos que lo llevan.
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Abre la interfaz web antigua en Chromium en vez de la ventana "
+        "nativa (se retirará).",
     )
     return parser.parse_args(argv)
 
@@ -534,12 +541,10 @@ def main(argv: list[str] | None = None) -> int:
             _shutdown(server)
         return 0
 
-    if args.nativo:
-        # La ventana nativa está en construcción (ver
-        # `docs/BIMNEMO_INTERFAZ_NATIVA.md`). Mientras no esté terminada hay
-        # que pedirla a mano: así nunca hay una versión publicada en la que
-        # el usuario se quede sin pantallas.
-        from lightrag.api.bimnemo import BIMNEMO_VERSION, nativo
+    if not args.web:
+        # La ventana nativa es la aplicación. La web queda detrás de `--web`
+        # solo mientras se retira.
+        from lightrag.api.bimnemo import nativo
 
         if not nativo.disponible():
             print(
