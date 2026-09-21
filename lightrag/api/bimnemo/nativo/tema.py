@@ -390,13 +390,17 @@ def hoja(p: Paleta) -> str:
 
     /* El pie del grafo: leyenda y ayuda. Con fondo y un borde arriba para
        que se lea como pie y no como algo flotando sobre el lienzo. */
-    /* La caja lleva el color de la tarjeta, NO el del lienzo. Con los dos
-       del mismo color no se veía dónde acababa el dibujo, y la leyenda de
-       abajo parecía flotar sobre él en vez de estar en el hueco de la caja. */
+    /* **Un solo box.** El lienzo se funde con él —mismo fondo, sin borde ni
+       esquinas propias— y lo que separa el dibujo de la leyenda de abajo es
+       una línea y un hueco, no un segundo marco. */
     #caja-grafo {{
-        background: {p.elevada};
+        background: {p.fondo};
         border: 1px solid {p.borde};
         border-radius: 8px;
+    }}
+    #separador-grafo {{
+        background: {p.borde};
+        border: none;
     }}
     #cifra-tarjeta {{
         background: {p.elevada};
@@ -593,7 +597,17 @@ def hoja(p: Paleta) -> str:
         font-weight: 600;
     }}
     #error {{ color: #f87171; font-size: 12px; }}
-    QCheckBox {{ color: {p.texto_2}; spacing: 8px; }}
+    /* El rótulo de un campo dentro de un diálogo. En minúsculas, al
+       contrario que los de la barra del grafo: aquí es una etiqueta de
+       formulario, no un encabezado de sección. */
+    #rotulo-dialogo {{
+        color: {p.texto_2};
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    /* Sin fondo propio: dentro de un diálogo, una casilla con el color
+       general del fondo deja una banda oscura de lado a lado. */
+    QCheckBox {{ background: transparent; color: {p.texto_2}; spacing: 8px; }}
     QCheckBox::indicator {{
         background: {p.fondo};
         border: 1px solid {p.borde_medio};

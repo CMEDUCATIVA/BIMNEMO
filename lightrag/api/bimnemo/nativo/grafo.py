@@ -100,7 +100,12 @@ class Grafo(QWidget):
         # Alto generoso a propósito: con poco sitio, el encuadre reduce
         # tanto la escala que los nodos quedan en dos píxeles y los
         # rótulos no llegan a salir. Un grafo que no se lee no informa.
-        self.setMinimumHeight(560)
+        # Mínimo bajo a propósito. Con 300 píxeles, en una ventana corta el
+        # box no daba para lienzo + leyenda y Qt los solapaba: medido, el pie
+        # empezaba **nueve píxeles antes** de que el lienzo terminara. Quien
+        # manda sobre el alto es la leyenda, que es texto y no se puede
+        # encoger; el lienzo cede lo que haga falta.
+        self.setMinimumHeight(160)
         self.setMouseTracking(True)
         self.setCursor(Qt.OpenHandCursor)
 
@@ -399,14 +404,21 @@ class Grafo(QWidget):
     def paintEvent(self, _evento) -> None:  # noqa: N802 (nombre de Qt)
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.Antialiasing)
-        # Redondeado por los cuatro lados: el lienzo es un rectángulo
-        # **dentro** de la caja, con el hueco de la leyenda debajo. Recto por
-        # abajo se confundía con el fondo de la caja y no se veía dónde
-        # terminaba el dibujo.
+        # Redondeado arriba y recto abajo: el lienzo ocupa la parte de
+        # arriba del box y abajo lo corta la línea de separación. Sin
+        # redondear arriba se comería las esquinas del box.
         fondo = QPainterPath()
-        fondo.addRoundedRect(QRectF(self.rect()), 7.0, 7.0)
-        pintor.fillPath(fondo, QColor("#020617"))
-        # Todo lo demás se recorta a ese fondo: ni un nodo fuera de la caja.
+        radio = 7.0
+        caja = QRectF(self.rect())
+        fondo.moveTo(caja.left(), caja.bottom())
+        fondo.lineTo(caja.left(), caja.top() + radio)
+        fondo.quadTo(caja.left(), caja.top(), caja.left() + radio, caja.top())
+        fondo.lineTo(caja.right() - radio, caja.top())
+        fondo.quadTo(caja.right(), caja.top(), caja.right(), caja.top() + radio)
+        fondo.lineTo(caja.right(), caja.bottom())
+        fondo.closeSubpath()
+        pintor.fillPath(fondo, QColor(tema.ACTUAL.fondo))
+        # Todo lo demás se recorta a ese fondo: ni un nodo fuera del box.
         pintor.setClipPath(fondo)
 
         if not self._nodos:

@@ -230,7 +230,7 @@ class Cifra(QFrame):
         fila.setSpacing(7)
 
         marca = QLabel()
-        marca.setPixmap(iconos.pixmap(icono_nombre, 14, tema.ACTUAL.azul))
+        iconos.poner(marca, icono_nombre, 14, "azul")
         fila.addWidget(marca)
 
         etiqueta = QLabel(rotulo.upper())
@@ -256,7 +256,7 @@ class Cifra(QFrame):
 def _boton_icono(nombre: str, pista: str) -> QPushButton:
     boton = QPushButton()
     boton.setObjectName("icono")
-    boton.setIcon(iconos.icono(nombre, 15, tema.ACTUAL.texto_2))
+    iconos.poner(boton, nombre, 15, "texto_2")
     boton.setToolTip(pista)
     boton.setCursor(Qt.PointingHandCursor)
     boton.setFixedSize(32, 30)
@@ -369,7 +369,7 @@ class PantallaPanel(QWidget):
         fila.setSpacing(8)
 
         marca = QLabel()
-        marca.setPixmap(iconos.pixmap("entidades", 15, tema.ACTUAL.azul))
+        iconos.poner(marca, "entidades", 15, "azul")
         fila.addWidget(marca)
 
         titulo = QLabel("Grafo de conocimiento")
@@ -391,15 +391,26 @@ class PantallaPanel(QWidget):
         self.caja_lienzo = QFrame()
         self.caja_lienzo.setObjectName("caja-grafo")
         caja = QVBoxLayout(self.caja_lienzo)
-        # El lienzo va embutido con aire alrededor, y debajo queda el hueco
-        # para la leyenda: dentro de la caja, no encima del dibujo.
-        caja.setContentsMargins(8, 8, 8, 4)
-        caja.setSpacing(8)
+        # Sin márgenes: el lienzo llega a los bordes del box, como debe ser
+        # si son la misma cosa. Lo único que separa el dibujo de los datos
+        # de abajo es la línea que va entre los dos.
+        caja.setContentsMargins(0, 0, 0, 0)
+        caja.setSpacing(0)
 
         self.grafo = Grafo()
         self.grafo.elegido.connect(self._pintar_detalle)
         self.grafo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         caja.addWidget(self.grafo, 1)
+
+        # Una línea de un píxel, de borde a borde. No es un marco: es lo que
+        # dice dónde acaba el dibujo. Sin ella, y con el mismo fondo, la
+        # leyenda parecía escrita encima del grafo — y al estrechar la
+        # ventana se juntaban del todo.
+        separador = QFrame()
+        separador.setObjectName("separador-grafo")
+        separador.setFixedHeight(1)
+        caja.addWidget(separador)
+
         caja.addWidget(self._pie())
 
         tarjeta.anadir(self.caja_lienzo)
@@ -422,8 +433,10 @@ class PantallaPanel(QWidget):
         """
         pie = QFrame()
         pie.setObjectName("pie-grafo")
+        # Toma el alto que necesite y ni uno más: el que cede es el lienzo.
+        pie.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         columna = QVBoxLayout(pie)
-        columna.setContentsMargins(12, 10, 12, 10)
+        columna.setContentsMargins(14, 12, 14, 12)
         columna.setSpacing(6)
 
         self.leyenda = QWidget()
@@ -584,6 +597,10 @@ class PantallaPanel(QWidget):
             self.rejilla_cifras.setRowStretch(fila, 1 if fila < filas else 0)
 
     # -- datos --------------------------------------------------------------
+
+    def retematizar(self) -> None:
+        """El lienzo del grafo se pinta a mano: hay que pedirle que repinte."""
+        self.grafo.update()
 
     def refrescar(self) -> None:
         self.motor.get("/bimnemo/stats", self._pintar_cifras, self._fallo)
