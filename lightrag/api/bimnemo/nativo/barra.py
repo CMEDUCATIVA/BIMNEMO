@@ -34,6 +34,16 @@ from lightrag.api.bimnemo.nativo.motor import PIDE_CLAVE, Motor
 from lightrag.api.bimnemo.nativo.piezas import insignia, pintar_insignia
 
 
+#: Ancho del selector de memoria.
+ANCHO_SELECTOR = 250
+
+#: Por debajo de este ancho de ventana se esconde el lema. El selector va
+#: centrado de verdad, así que lo que ocupa la marca lo pierde el hueco de los
+#: dos lados: con el lema a la vista y la ventana en su mínimo, el selector
+#: ancho se montaba sobre «Actualizar».
+ANCHO_SIN_LEMA = 1180
+
+
 class BarraSuperior(QFrame):
     """La barra, con todo lo que no pertenece a ninguna pantalla."""
 
@@ -104,7 +114,9 @@ class BarraSuperior(QFrame):
         caja.setSpacing(4)
 
         self.selector = QComboBox()
-        self.selector.setMinimumWidth(176)
+        # Ancho de sobra para leer el nombre entero: es lo que dice con qué
+        # datos se está trabajando, y cortado a media palabra no lo dice.
+        self.selector.setMinimumWidth(ANCHO_SELECTOR)
         self.selector.setFixedHeight(30)
         self.selector.setToolTip("Memoria abierta")
         # `activated` y no `currentIndexChanged`: el primero solo salta cuando
@@ -155,6 +167,10 @@ class BarraSuperior(QFrame):
         self.boton_tema.clicked.connect(self.tema_alternado.emit)
         fila.addWidget(self.boton_tema)
         return caja_exterior
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre de Qt)
+        super().resizeEvent(evento)
+        self.lema.setVisible(self.width() >= ANCHO_SIN_LEMA)
 
     def _boton(self, icono: str, pista: str, principal: bool = False) -> QPushButton:
         boton = QPushButton()
