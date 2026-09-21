@@ -396,6 +396,150 @@ _EXCEPTION_HINTS: tuple[tuple[str, str], ...] = (
 )
 
 
+#: Lo que se añade a cada aviso: dónde se arregla lo que ya falló.
+_REINTENTAR = "Después pulsa «Reintentar» en Archivos."
+
+#: Los fallos de los proveedores que más se repiten, y qué hacer con cada uno.
+#:
+#: Cada proveedor contesta en inglés y a su manera —«You have no credits
+#: remaining», «insufficient_quota», «Your credit balance is too low»— y lo
+#: que se enseñaba era esa frase tal cual. El usuario no tiene por qué saber
+#: inglés ni qué es una cuota: tiene que saber qué ha pasado y qué hacer.
+#:
+#: Se busca en el texto entero, en minúsculas, porque el código del error
+#: (``insufficient_quota``) viaja fuera de la frase. **El orden importa**: la
+#: falta de saldo llega como un 429, igual que el exceso de peticiones, y hay
+#: que reconocerla antes para no mandar a nadie a «esperar unos minutos» a una
+#: cuenta que está a cero.
+_PROVEEDOR_EN_CASTELLANO: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (
+            "no credits remaining",
+            "insufficient_quota",
+            "exceeded your current quota",
+            "credit balance is too low",
+            "insufficient balance",
+            "billing_hard_limit",
+            "payment required",
+        ),
+        "Tu cuenta del proveedor de IA se ha quedado sin saldo, así que no se "
+        "pudo leer el documento. Añade crédito{donde}. Lo que ya estaba en la "
+        "memoria no se ha perdido. " + _REINTENTAR,
+    ),
+    (
+        ("account is not active", "account_deactivated", "account has been deactivated"),
+        "La cuenta del proveedor de IA no está activa. Revísala en su web. "
+        + _REINTENTAR,
+    ),
+    (
+        (
+            "incorrect api key",
+            "invalid_api_key",
+            "invalid x-api-key",
+            "api key not valid",
+            "invalid api key",
+            "authenticationerror",
+        ),
+        "El proveedor de IA rechazó la clave de API. Revísala en Configuración "
+        "IA. " + _REINTENTAR,
+    ),
+    (
+        ("model_not_found", "does not exist", "notfounderror", "unknown model"),
+        "El proveedor de IA no reconoce el modelo{modelo}. Elige otro en "
+        "Configuración IA. " + _REINTENTAR,
+    ),
+    (
+        ("context_length_exceeded", "maximum context length", "too many tokens"),
+        "El texto es demasiado largo para el modelo elegido. Prueba con un "
+        "modelo que admita más contexto en Configuración IA. " + _REINTENTAR,
+    ),
+    (
+        ("rate limit", "rate_limit", "too many requests", "ratelimiterror"),
+        "El proveedor de IA ha frenado las peticiones por ir demasiado rápido. "
+        "Espera unos minutos. " + _REINTENTAR,
+    ),
+    (
+        ("overloaded", "service unavailable", "internal server error", "bad gateway"),
+        "El servicio del proveedor de IA está saturado o caído en este "
+        "momento. No es cosa tuya: vuelve a intentarlo más tarde. " + _REINTENTAR,
+    ),
+    (
+        (
+            "apiconnectionerror",
+            "connection error",
+            "connecterror",
+            "failed to establish",
+            "name or service not known",
+            "getaddrinfo failed",
+        ),
+        "No se pudo conectar con el proveedor de IA. Comprueba tu conexión a "
+        "internet y la dirección en Configuración IA. " + _REINTENTAR,
+    ),
+    (
+        ("timed out", "timeout", "apitimeouterror"),
+        "El proveedor de IA tardó demasiado en contestar. " + _REINTENTAR,
+    ),
+)
+
+#: A partir de cuántos caracteres una ruta de Windows da problemas. El límite
+#: clásico es 260; se avisa un poco antes porque el lector de documentos
+#: todavía añade nombres de fichero por debajo de la ruta que sale en el error.
+RUTA_LARGA = 240
+
+#: Una ruta de Windows entre comillas dentro de un mensaje de error.
+_RUTA = re.compile(r"'([A-Za-z]:\\[^']+)'")
+
+_RUTA_DEMASIADO_LARGA = (
+    "El nombre del archivo es demasiado largo para Windows: al leerlo, "
+    "BIMNEMO crea carpetas con ese nombre y la ruta pasa del límite. "
+    "Renómbralo con un nombre más corto, bórralo en Archivos y vuelve a "
+    "subirlo."
+)
+
+
+def _ruta_demasiado_larga(texto: str, minusculas: str) -> bool:
+    """¿Es un fallo por pasarse del límite de longitud de ruta de Windows?
+
+    Windows lo dice de tres maneras según dónde falle: «WinError 206» (el
+    nombre es demasiado largo), y también «WinError 3» o «Errno 2» (no
+    encuentra la ruta), porque la carpeta que debía contenerla no se llegó a
+    crear. Las dos últimas solo cuentan si la ruta es de verdad larga: con una
+    corta son otro problema.
+    """
+    if "winerror 206" in minusculas or "is too long" in minusculas:
+        return True
+    if not any(c in minusculas for c in ("winerror 3]", "errno 2]")):
+        return False
+    rutas = [r.replace("\\\\", "\\") for r in _RUTA.findall(texto)]
+    return any(len(r) >= RUTA_LARGA for r in rutas)
+
+
+_ENLACE = re.compile(r"https?://[^\s'\"<>]+")
+_MODELO = re.compile(r"model[`'\" ]+([\w.\-:/]+)[`'\"]", re.IGNORECASE)
+
+
+def en_castellano(raw: Any) -> Optional[str]:
+    """El fallo de un proveedor dicho en castellano, con qué hacer; o None.
+
+    ``None`` si no es ninguno de los conocidos: entonces se enseña lo que dijo
+    el proveedor, que es mejor que inventarse un motivo.
+    """
+    texto = " ".join(str(raw or "").split())
+    minusculas = texto.lower()
+    if _ruta_demasiado_larga(texto, minusculas):
+        return _RUTA_DEMASIADO_LARGA
+    for claves, plantilla in _PROVEEDOR_EN_CASTELLANO:
+        if not any(clave in minusculas for clave in claves):
+            continue
+        enlace = _ENLACE.search(texto)
+        modelo = _MODELO.search(texto)
+        return plantilla.format(
+            donde=f" en {enlace.group(0).rstrip('.,;)')}" if enlace else "",
+            modelo=f" «{modelo.group(1)}»" if modelo else "",
+        )[:MAX_REASON]
+    return None
+
+
 def _clean_reason(raw: Any) -> Optional[str]:
     """Deja un motivo de fallo legible a partir de la excepción del motor.
 
@@ -408,6 +552,11 @@ def _clean_reason(raw: Any) -> Optional[str]:
     """
     if not raw:
         return None
+
+    # Primero lo que se sabe explicar en castellano: sin saldo, clave mala…
+    traducido = en_castellano(raw)
+    if traducido:
+        return traducido
 
     texto = " ".join(str(raw).split())
 
@@ -553,7 +702,7 @@ def merge_files_with_memory(
                     "error_msg": (
                         explicar_copia(stored.name, original)
                         if original is not None
-                        else error
+                        else _clean_reason(error)
                     ),
                     # El original, si es una copia repetida; `None` si no.
                     "duplicate_of": original,

@@ -87,4 +87,4 @@ def test_un_fallo_de_verdad_gana_a_la_copia():
     )
     memoria = asyncio.run(summarize_memory(_Rag(docs)))
     assert memoria["failed_kind"] == "error"
-    assert "Incorrect API key" in memoria["failed_reason"]
+    assert "clave de API" in memoria["failed_reason"]
