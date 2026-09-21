@@ -28,8 +28,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QByteArray, QPointF, Qt
-from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 CARPETA = Path(__file__).resolve().parent / "iconos"
@@ -69,7 +69,6 @@ NOMBRES = {
     "conversacion": "chat-square-text",
     "desplegar": "chevron-down",
     # Secciones del panel
-    "memorias": "bar-chart-steps",
     "categorias": "grid-3x3-gap",
     "tipos": "file-earmark-text",
     # Las categorías del catálogo. La clave es el nombre **que manda el
@@ -80,13 +79,10 @@ NOMBRES = {
     "file-text": "file-earmark-text",
     "table": "file-earmark-spreadsheet",
     "presentation": "file-earmark-slides",
-    "image": "image",
-    "box": "box",
-    "ruler": "rulers",
     "database": "database",
     "code": "code-slash",
     # Marca
-    "marca": "diagram-3-fill",
+    "marca": "cerebro-circuito",
 }
 
 
@@ -204,51 +200,68 @@ def retenir(raiz) -> None:
             _aplicar(widget)
 
 
-def marca(lado: int) -> QPixmap:
-    """El cuadrado azul de la marca, dibujado con el mismo glifo que la web.
+#: El azul de la marca. Fijo, no el del tema: el icono de la barra de tareas
+#: y el del instalador son el mismo y no cambian porque el usuario ponga el
+#: tema claro.
+AZUL_MARCA = "#2563eb"
 
-    Se dibuja en vez de cargar una imagen para que siga el tamaño de la
-    pantalla: en un monitor de alta densidad un `.png` de 28 píxeles se ve
-    borroso y este no.
+#: Cuánto del cuadrado ocupa el cerebro. Por debajo se ve perdido; por encima
+#: toca las esquinas redondeadas.
+PROPORCION_MARCA = 0.66
+
+
+def marca(lado: int) -> QPixmap:
+    """El cerebro blanco de la marca, con su aire, sobre fondo transparente.
+
+    El aire va **aquí dentro** y no en quien la coloca porque son dos sitios
+    —el cuadrado azul del encabezado, que lo pone la hoja de estilo, y el
+    icono de Windows, que lo pinta `cuadrado`— y la marca tiene que verse
+    igual en los dos.
+
+    Se dibuja en vez de cargar un `.png` para que siga al tamaño de la
+    pantalla: en un monitor de alta densidad una imagen de 28 píxeles se ve
+    borrosa y ésta no.
+    """
+    lienzo = QPixmap(lado, lado)
+    lienzo.fill(Qt.transparent)
+
+    dentro = max(1, int(lado * PROPORCION_MARCA))
+    hueco = (lado - dentro) / 2.0
+
+    pintor = QPainter(lienzo)
+    pintor.setRenderHint(QPainter.Antialiasing)
+    pintor.drawPixmap(int(hueco), int(hueco), pixmap("marca", dentro, "#ffffff"))
+    pintor.end()
+    return lienzo
+
+
+def cuadrado(lado: int) -> QPixmap:
+    """La marca **con su fondo**: el icono de la aplicación.
+
+    Es lo que ve Windows —barra de tareas, Alt+Tab, Administrador de
+    tareas— y lo que lleva el `.ico` del instalador. Sale de aquí y no de
+    una imagen aparte para que no puedan separarse: dos marcas que deberían
+    ser la misma acaban discrepando, y la que discrepa sin que nadie lo note
+    es siempre la que solo se ve fuera del programa.
     """
     lienzo = QPixmap(lado, lado)
     lienzo.fill(Qt.transparent)
 
     pintor = QPainter(lienzo)
     pintor.setRenderHint(QPainter.Antialiasing)
-    pintor.setBrush(Qt.NoBrush)
+    pintor.setPen(Qt.NoPen)
+    pintor.setBrush(QColor(AZUL_MARCA))
+    pintor.drawRoundedRect(0, 0, lado, lado, lado * 0.22, lado * 0.22)
 
-    grosor = max(1.0, lado / 12.0)
-    pluma = QPen(Qt.white, grosor)
-    pluma.setCapStyle(Qt.RoundCap)
-    pluma.setJoinStyle(Qt.RoundJoin)
-    pintor.setPen(pluma)
-
-    # Rejilla de 24, la del `viewBox` del icono `network` de `icons.js`.
-    escala = lado / 24.0 * 0.66
-    margen = (lado - 24 * escala) / 2.0
-
-    def p(x: float, y: float) -> tuple[float, float]:
-        return (margen + x * escala, margen + y * escala)
-
-    for x, y in ((16, 16), (2, 16), (9, 2)):
-        ex, ey = p(x, y)
-        pintor.drawRoundedRect(ex, ey, 6 * escala, 6 * escala, escala, escala)
-
-    pintor.drawPolyline(
-        [_punto(p(5, 16)), _punto(p(5, 12)), _punto(p(19, 12)), _punto(p(19, 16))]
-    )
-    pintor.drawLine(*p(12, 12), *p(12, 8))
+    pintor.drawPixmap(0, 0, marca(lado))
     pintor.end()
     return lienzo
 
 
-def _punto(par: tuple[float, float]) -> QPointF:
-    return QPointF(par[0], par[1])
-
-
 __all__ = [
+    "AZUL_MARCA",
     "NOMBRES",
+    "cuadrado",
     "icono",
     "marca",
     "pixmap",

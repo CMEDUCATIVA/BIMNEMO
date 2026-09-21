@@ -1,115 +1,73 @@
 """Dibuja el icono de BIMNEMO y lo deja en ``installer/bimnemo.ico``.
 
-El icono **no se inventa**: es la misma marca que lleva la aplicación en su
-encabezado —el cuadrado azul con el glifo `network`— copiada de donde ya
-estaba definida, para que lo que se ve en la barra de tareas y lo que se ve
-dentro del programa sean la misma cosa.
+El icono **no se inventa**: es exactamente la misma marca que lleva la
+aplicación en su encabezado, pedida a la misma función. Antes este fichero
+volvía a dibujar el glifo a mano con Pillow, y eso son dos dibujos que
+deberían ser el mismo: el que se separa sin que nadie lo note es siempre el
+de fuera del programa, porque dentro se ve todos los días y en la barra de
+tareas no se mira.
 
-    color   `--oe-blue` de `ui/css/tokens.css`
-    glifo   `icons.js`, entrada `network`, rejilla de 24×24
+    marca   `nativo/iconos.py`, `cuadrado()` — el cerebro de circuitos
+            blanco sobre el cuadrado azul de la aplicación
+
+Cada tamaño se renderiza del SVG a su resolución en vez de reducir uno
+grande: el glifo es una silueta maciza, y a 16 píxeles sale más limpio
+dibujado a 16 que encogido desde 1024.
 
 El `.ico` resultante **sí** se versiona —el instalador lo necesita para
 compilar y no puede depender de que alguien se acuerde de generarlo— pero se
-genera desde aquí para que se pueda rehacer: cambiar el color de marca y
-volver a lanzarlo es un segundo. El binario en git es el resultado, no la
-fuente; la fuente es este fichero.
+genera desde aquí para que se pueda rehacer. El binario en git es el
+resultado, no la fuente; la fuente es la marca de la aplicación.
 
 Uso:
 
-    python scripts/release/icono.py
+    .venv\\Scripts\\python.exe scripts/release/icono.py
 """
 
 from __future__ import annotations
 
-import sys
+import os
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[2]
 DESTINO = RAIZ / "installer" / "bimnemo.ico"
-
-#: El azul de la marca, de `--oe-blue` en el tema claro.
-AZUL = (37, 99, 235, 255)
-BLANCO = (255, 255, 255, 255)
-
-#: Se dibuja grande y se reduce: a 16 píxeles, dibujar directamente deja el
-#: trazo hecho trizas, mientras que reducir con Lanczos lo conserva legible.
-LADO = 1024
 
 #: Los tamaños que Windows pide en cada sitio: 16 en la barra de título y el
 #: Administrador de tareas, 32 en el escritorio, 256 en la vista de iconos
 #: grandes del Explorador.
 TAMANOS = (16, 24, 32, 48, 64, 128, 256)
 
-#: Proporción del glifo dentro del cuadrado. Por debajo de 0.55 se ve
-#: perdido; por encima de 0.65 toca las esquinas redondeadas.
-PROPORCION_GLIFO = 0.58
 
-#: Radio del cuadrado, en proporción al lado. Es el mismo aire que tiene
-#: `--radius-md` sobre la marca de 1.75rem del encabezado.
-RADIO = 0.22
+def _capas(tamanos=TAMANOS):
+    """La marca en cada tamaño, ya como imágenes de Pillow."""
+    import io
 
+    from PIL import Image
+    from PySide6.QtCore import QBuffer
+    from PySide6.QtGui import QGuiApplication
 
-def _dibujar(lado: int):
-    """El icono a tamaño completo, sobre fondo transparente."""
-    from PIL import Image, ImageDraw
+    # Sin pantalla: esto se lanza desde una consola y a veces desde un
+    # servidor de integración continua.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QGuiApplication.instance() or QGuiApplication([])
 
-    lienzo = Image.new("RGBA", (lado, lado), (0, 0, 0, 0))
-    pincel = ImageDraw.Draw(lienzo)
+    import sys
 
-    pincel.rounded_rectangle(
-        (0, 0, lado - 1, lado - 1), radius=int(lado * RADIO), fill=AZUL
-    )
+    sys.path.insert(0, str(RAIZ))
+    from lightrag.api.bimnemo.nativo import iconos
 
-    # El glifo viene de una rejilla de 24×24, que es el `viewBox` del SVG.
-    escala = lado * PROPORCION_GLIFO / 24.0
-    margen = (lado - 24 * escala) / 2.0
-    grosor = max(1, int(round(2 * escala)))  # `stroke-width: 2`
-
-    def p(x: float, y: float) -> tuple[float, float]:
-        return (margen + x * escala, margen + y * escala)
-
-    # Las tres cajas: dos abajo y una arriba.
-    for x, y in ((16, 16), (2, 16), (9, 2)):
-        pincel.rounded_rectangle(
-            (p(x, y), p(x + 6, y + 6)),
-            radius=escala,
-            outline=BLANCO,
-            width=grosor,
-        )
-
-    # El bus que une la caja de arriba con las dos de abajo. En el SVG son
-    # curvas de radio 1; a este tamaño una polilínea con uniones redondeadas
-    # es indistinguible, y no hay que calcular arcos.
-    pincel.line(
-        [p(5, 16), p(5, 12), p(19, 12), p(19, 16)],
-        fill=BLANCO,
-        width=grosor,
-        joint="curve",
-    )
-    pincel.line([p(12, 12), p(12, 8)], fill=BLANCO, width=grosor)
-
-    # `joint="curve"` redondea las uniones pero **no los extremos**, que
-    # quedan cortados a escuadra y se notan. Se rematan a mano.
-    radio = grosor / 2.0
-    for punto in (p(5, 16), p(19, 16), p(12, 12), p(12, 8)):
-        x, y = punto
-        pincel.ellipse((x - radio, y - radio, x + radio, y + radio), fill=BLANCO)
-
-    return lienzo
+    capas = []
+    for lado in tamanos:
+        buffer = QBuffer()
+        buffer.open(QBuffer.ReadWrite)
+        iconos.cuadrado(lado).save(buffer, "PNG")
+        capas.append(Image.open(io.BytesIO(buffer.data().data())).convert("RGBA"))
+    return capas
 
 
 def generar(destino: Path = DESTINO) -> Path:
     """Escribe el `.ico` con todos los tamaños dentro."""
-    from PIL import Image
-
-    grande = _dibujar(LADO)
-    # Se reduce una vez por tamaño con Lanczos en vez de dejar que el
-    # escritor del `.ico` lo haga con su remuestreo por defecto, que a 16
-    # píxeles deja el trazo sucio.
-    capas = [
-        grande.resize((lado, lado), Image.Resampling.LANCZOS) for lado in TAMANOS
-    ]
-
+    capas = _capas()
     destino.parent.mkdir(parents=True, exist_ok=True)
     medidas = [(lado, lado) for lado in TAMANOS]
 
@@ -128,20 +86,22 @@ def generar(destino: Path = DESTINO) -> Path:
 
 
 def main() -> int:
-    try:
-        import PIL  # noqa: F401
-    except ImportError:
-        raise SystemExit(
-            "Hace falta Pillow para dibujar el icono:\n"
-            "    .venv\\Scripts\\python.exe -m pip install pillow"
-        )
+    for modulo, consejo in (
+        ("PIL", "pillow"),
+        ("PySide6", "pyside6-essentials"),
+    ):
+        try:
+            __import__(modulo)
+        except ImportError:
+            raise SystemExit(
+                f"Hace falta {consejo} para dibujar el icono:\n"
+                f"    .venv\\Scripts\\python.exe -m pip install {consejo}"
+            )
 
     ruta = generar()
     print(f"Icono escrito en {ruta}")
-    print(f"  tamaños  {', '.join(str(t) for t in TAMANOS)}")
-    print(f"  {ruta.stat().st_size / 1024:.0f} KB")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

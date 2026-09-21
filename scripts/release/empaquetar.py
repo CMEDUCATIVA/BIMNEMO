@@ -135,9 +135,14 @@ import site
 #: Son **copias**, no renombrados, porque `python.exe` sigue haciendo falta:
 #: es el que usa `pip` cuando una actualización trae dependencias nuevas
 #: (ver `python_del_entorno` en `bimnemo/paquete.py`).
+#: La descripción va en minúscula y a secas. Es lo que el Administrador de
+#: tareas pone como nombre del proceso, junto a «Google Chrome» o «Visual
+#: Studio Code»: ahí se busca una palabra, no un rótulo.
+DESCRIPCION = "bimnemo"
+
 CARAS = (
-    ("pythonw.exe", "bimnemo.exe", "BIMNEMO"),
-    ("python.exe", "bimnemo-consola.exe", "BIMNEMO (diagnóstico)"),
+    ("pythonw.exe", "bimnemo.exe", DESCRIPCION),
+    ("python.exe", "bimnemo-consola.exe", "bimnemo (diagnóstico)"),
 )
 
 #: Python busca su fichero de rutas por el **nombre del ejecutable**: para
@@ -271,7 +276,7 @@ def _puerta_de_entrada(interprete: Path, ico: Path, version: str) -> None:
 
     shutil.copy2(interprete / "pythonw.exe", raiz / "bimnemo.exe")
     (raiz / "bimnemo._pth").write_text(RUTAS_DESDE_LA_RAIZ, encoding="utf-8")
-    sellar.sellar(raiz / "bimnemo.exe", ico, version, "BIMNEMO")
+    sellar.sellar(raiz / "bimnemo.exe", ico, version, DESCRIPCION)
 
     for nombre in DLLS_DEL_INTERPRETE:
         origen = interprete / nombre

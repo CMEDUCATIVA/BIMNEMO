@@ -59,8 +59,10 @@ def clave_guardada() -> str:
 
 def abrir(base_url: str, version: str) -> int:
     """Arranca la ventana. Devuelve el código de salida de la aplicación."""
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
 
+    from lightrag.api.bimnemo.nativo import iconos
     from lightrag.api.bimnemo.nativo.motor import Motor
     from lightrag.api.bimnemo.nativo.ventana import Ventana
 
@@ -70,6 +72,18 @@ def abrir(base_url: str, version: str) -> int:
     # Sin `setApplicationDisplayName`: Qt lo **añade** al título de cada
     # ventana, y la barra quedaba «BIMNEMO — Memoria de conocimiento -
     # BIMNEMO».
+
+    # La marca, en todos los tamaños que Windows pide.
+    #
+    # Sin esto la barra de tareas enseña el icono del intérprete —la «py»
+    # amarilla y azul—, que es verdad y es lo peor que puede decir: que esto
+    # no es un programa, es Python ejecutando algo. Se dan varios tamaños
+    # porque Windows pide 16 para la barra de título y 32 para Alt+Tab, y si
+    # solo hay uno lo escala él, mal.
+    marca = QIcon()
+    for lado in (16, 24, 32, 48, 64, 128, 256):
+        marca.addPixmap(iconos.cuadrado(lado))
+    app.setWindowIcon(marca)
 
     motor = Motor(base_url)
     motor.usar_clave(clave_guardada())
