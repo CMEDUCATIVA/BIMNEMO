@@ -118,7 +118,7 @@ conservarlos:
 ```bash
 git stash
 git pull origin main
-pip install -e .[api]
+pip install -e ".[api,escritorio]"
 git stash pop
 ```
 
