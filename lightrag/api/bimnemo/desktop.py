@@ -180,8 +180,31 @@ def health_responds(base_url: str, timeout: float = 2.0) -> bool:
         return False
 
 
-def _server_command(host: str, port: int) -> list[str]:
-    """Cómo arrancar el servidor desde el mismo entorno que este proceso."""
+def _somos_bimnemo() -> bool:
+    """¿Corre esto dentro de un intérprete con la cara de BIMNEMO?"""
+    return Path(sys.executable).stem.lower().startswith("bimnemo")
+
+
+def _server_command(host: str, port: int, quiet: bool = True) -> list[str]:
+    """Cómo arrancar el servidor desde el mismo entorno que este proceso.
+
+    Si este proceso es `bimnemo.exe`, el motor también: con el script
+    `lightrag-server.exe` salía un grupo aparte llamado «Python» en el
+    Administrador de tareas —el script es un lanzador que arranca el Python
+    del sistema—, y el usuario veía dos programas donde hay uno. Con
+    `--consola` se deja el script, porque `bimnemo.exe` no tiene consola y
+    la salida del motor es justo lo que se quiere ver.
+    """
+    if quiet and _somos_bimnemo():
+        return [
+            sys.executable,
+            "-m",
+            "lightrag.api.lightrag_server",
+            "--host",
+            host,
+            "--port",
+            str(port),
+        ]
     script = Path(sys.executable).parent / (
         "lightrag-server.exe" if os.name == "nt" else "lightrag-server"
     )
@@ -234,7 +257,7 @@ def start_server(host: str, port: int, *, quiet: bool) -> subprocess.Popen:
         stdout = subprocess.DEVNULL
 
     return subprocess.Popen(
-        _server_command(host, port),
+        _server_command(host, port, quiet),
         env=env,
         stdout=stdout,
         stderr=subprocess.STDOUT if stdout is not None else None,
@@ -430,7 +453,35 @@ def marcar_en_marcha() -> None:
         print(f"No se pudo señalar que BIMNEMO está abierto: {exc}", file=sys.stderr)
 
 
+def _relanzar_como_bimnemo(argv: list[str]) -> bool:
+    """Se vuelve a abrir con `bimnemo.exe` si está al lado y no es éste.
+
+    Al desarrollar se arranca con el `pythonw.exe` del entorno, que en
+    Windows es un redirector: la ventana acaba en el Python del sistema y el
+    Administrador de tareas dice «Python» con su icono. Si
+    `scripts/release/cara_local.py` ha dejado un `bimnemo.exe` en la misma
+    carpeta, se relanza con él y este proceso termina: así da igual cómo se
+    abra —acceso directo, terminal, costumbre—, siempre sale «bimnemo».
+
+    `BIMNEMO_SIN_CARA=1` lo desactiva, para depurar con el intérprete tal
+    cual.
+    """
+    if os.name != "nt" or _somos_bimnemo() or os.getenv("BIMNEMO_SIN_CARA"):
+        return False
+    propio = Path(sys.executable).parent / "bimnemo.exe"
+    if not propio.is_file():
+        return False
+    subprocess.Popen(
+        [str(propio), "-m", "lightrag.api.bimnemo.desktop", *argv],
+        close_fds=True,
+    )
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
+    if _relanzar_como_bimnemo(list(sys.argv[1:] if argv is None else argv)):
+        return 0
+
     args = _parse_args(argv)
     base_url = f"http://{args.host}:{args.port}"
     app_url = f"{base_url}{UI_PATH}"

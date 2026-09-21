@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -26,6 +25,7 @@ from PySide6.QtWidgets import (
 from lightrag.api.bimnemo.nativo import formato, iconos, tema
 from lightrag.api.bimnemo.nativo.barra import BarraSuperior
 from lightrag.api.bimnemo.nativo.memorias import Memorias, ajustes
+from lightrag.api.bimnemo.nativo.panel_piezas import ResumenCarril
 from lightrag.api.bimnemo.nativo.motor import Motor
 
 #: Las pantallas, en el orden en que salen. El segundo valor es la etapa del
@@ -91,7 +91,7 @@ class Ventana(QMainWindow):
         self.memorias = Memorias(motor, self)
 
         self.setWindowTitle("BIMNEMO — Memoria de conocimiento")
-        self.setWindowIcon(QIcon(iconos.marca(64)))
+        self.setWindowIcon(iconos.de_la_aplicacion())
         self.resize(1280, 820)
         self.setMinimumSize(980, 620)
         self.setStyleSheet(tema.hoja(self.paleta))
@@ -129,7 +129,7 @@ class Ventana(QMainWindow):
 
         # Cambiar de memoria es cambiar de datos en TODAS las pantallas: el
         # motor ya enruta a la nueva, así que basta con pedirles que relean.
-        self.memorias.cambiada.connect(lambda _id: self.refrescar_todo())
+        self.memorias.cambiada.connect(self._otra_memoria)
         # Y el nombre de la abierta, a quien lo enseñe. Va del registro a la
         # pantalla y no al revés: preguntarlo por su cuenta significaría dos
         # fuentes que se contradicen mientras una se entera antes que otra.
@@ -153,6 +153,30 @@ class Ventana(QMainWindow):
             if callable(releer):
                 releer()
         self.barra.comprobar_motor()
+
+    def _otra_memoria(self, _identificador: str) -> None:
+        """Se ha abierto otra memoria.
+
+        Primero se avisa a quien guarde estado de la anterior —el panel
+        recuerda una entidad de partida que en esta puede no existir— y
+        después se relee todo. Al revés, la relectura llegaría con los
+        filtros viejos puestos.
+        """
+        for indice in range(self.contenido.count()):
+            pantalla = self.contenido.widget(indice)
+            empezar = getattr(pantalla, "otra_memoria", None)
+            if callable(empezar):
+                empezar()
+        self.refrescar_todo()
+
+    def ir_a_archivos(self, categoria: str) -> None:
+        """Abre Archivos ya filtrado. Lo pide una tarjeta de categoría."""
+        archivos = self.contenido.widget(1)
+        filtrar = getattr(archivos, "filtrar", None)
+        if callable(filtrar):
+            filtrar(categoria)
+        self.contenido.setCurrentIndex(1)
+        self._botones[1].setChecked(True)
 
     def _repartir_memoria(self) -> None:
         nombre = self.memorias.nombre()
@@ -203,7 +227,10 @@ class Ventana(QMainWindow):
         from lightrag.api.bimnemo.nativo.pantalla_motor import PantallaMotor
         from lightrag.api.bimnemo.nativo.pantalla_panel import PantallaPanel
 
-        self.registrar_pantalla("Panel", PantallaPanel(self.motor))
+        panel = PantallaPanel(self.motor)
+        panel.categoria_elegida.connect(self.ir_a_archivos)
+        panel.almacenamiento.connect(self.resumen.poner)
+        self.registrar_pantalla("Panel", panel)
 
         archivos = PantallaArchivos(self.motor)
         # Una raya hasta que el motor conteste: un cero mientras se carga se
@@ -258,14 +285,19 @@ class Ventana(QMainWindow):
             )
             self._grupo.addButton(boton, indice)
             self._botones.append(boton)
-            self._cuentas[nombre], self._cajas_cuenta[boton] = self._contador(
-                boton
-            )
+            self._cuentas[nombre], self._cajas_cuenta[boton] = self._contador(boton)
 
             envoltorio = QHBoxLayout()
             envoltorio.setContentsMargins(8, 0, 8, 0)
             envoltorio.addWidget(boton)
             columna.addLayout(envoltorio)
+
+        # Justo debajo de la última entrada, no al fondo: las categorías
+        # crecen hacia abajo según se llenan, y con el resumen pegado al pie
+        # tendrían que empujar hacia arriba. El hueco sobrante queda después.
+        self.resumen = ResumenCarril()
+        self.resumen.elegida.connect(self.ir_a_archivos)
+        columna.addWidget(self.resumen)
 
         columna.addStretch(1)
 
@@ -296,6 +328,9 @@ class Ventana(QMainWindow):
         )
         self._rotulo_navegacion.setVisible(not estrecho)
         self.etiqueta_version.setVisible(not estrecho)
+        # En sesenta píxeles no cabe ni la cifra ni un chip: se esconde
+        # entero en vez de dejar un muñón ilegible.
+        self.resumen.setVisible(not estrecho)
 
         for boton, nombre in self._rotulos_nav.items():
             boton.setText("" if estrecho else nombre)
@@ -322,9 +357,7 @@ class Ventana(QMainWindow):
 
     def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre de Qt)
         super().resizeEvent(evento)
-        self._encoger_carril(
-            self.width() < tema.ANCHO_VENTANA_CARRIL_ESTRECHO
-        )
+        self._encoger_carril(self.width() < tema.ANCHO_VENTANA_CARRIL_ESTRECHO)
 
     @staticmethod
     def _contador(boton: QPushButton) -> tuple[QLabel, QHBoxLayout]:

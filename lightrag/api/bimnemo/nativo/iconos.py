@@ -258,10 +258,26 @@ def cuadrado(lado: int) -> QPixmap:
     return lienzo
 
 
+def de_la_aplicacion() -> QIcon:
+    """El icono de la ventana, en todos los tamaños que Windows pide.
+
+    Con fondo: la marca sola es un cerebro blanco sobre transparente, que en
+    el encabezado va dentro de su cuadrado azul pero en la barra de tareas
+    oscura quedaba como un borrón blanco sin marco. Se dan varios tamaños
+    porque Windows pide 16 para la barra de título y 32 para Alt+Tab, y si
+    solo hay uno lo escala él, mal.
+    """
+    icono_app = QIcon()
+    for lado in (16, 24, 32, 48, 64, 128, 256):
+        icono_app.addPixmap(cuadrado(lado))
+    return icono_app
+
+
 __all__ = [
     "AZUL_MARCA",
     "NOMBRES",
     "cuadrado",
+    "de_la_aplicacion",
     "icono",
     "marca",
     "pixmap",

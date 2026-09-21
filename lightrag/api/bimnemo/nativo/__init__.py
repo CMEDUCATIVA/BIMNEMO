@@ -57,9 +57,38 @@ def clave_guardada() -> str:
     return ""
 
 
+#: Cómo se identifica BIMNEMO ante la barra de tareas de Windows.
+ID_APLICACION = "CMEducativa.BIMNEMO"
+
+
+def _identidad_en_windows() -> None:
+    """Que la barra de tareas trate la ventana como BIMNEMO, no como Python.
+
+    Windows agrupa los botones de la barra por *identificador de aplicación*,
+    y si el proceso no declara uno usa el del ejecutable: el intérprete, con
+    su icono. Entonces `setWindowIcon` cambia la esquina de la ventana pero
+    no el botón de la barra, que es lo que se ve. Tiene que declararse
+    **antes** de crear la primera ventana.
+    """
+    import sys
+
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            ID_APLICACION
+        )
+    except (AttributeError, OSError):
+        # Windows muy antiguo: se queda el icono del ejecutable, que no es
+        # motivo para no abrir.
+        pass
+
+
 def abrir(base_url: str, version: str) -> int:
     """Arranca la ventana. Devuelve el código de salida de la aplicación."""
-    from PySide6.QtGui import QIcon
+    _identidad_en_windows()
     from PySide6.QtWidgets import QApplication
 
     from lightrag.api.bimnemo.nativo import iconos
@@ -80,10 +109,7 @@ def abrir(base_url: str, version: str) -> int:
     # no es un programa, es Python ejecutando algo. Se dan varios tamaños
     # porque Windows pide 16 para la barra de título y 32 para Alt+Tab, y si
     # solo hay uno lo escala él, mal.
-    marca = QIcon()
-    for lado in (16, 24, 32, 48, 64, 128, 256):
-        marca.addPixmap(iconos.cuadrado(lado))
-    app.setWindowIcon(marca)
+    app.setWindowIcon(iconos.de_la_aplicacion())
 
     motor = Motor(base_url)
     motor.usar_clave(clave_guardada())
