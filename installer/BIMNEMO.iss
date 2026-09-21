@@ -23,6 +23,9 @@
 ; ===========================================================================
 
 #define Nombre      "BIMNEMO"
+; El nombre de los accesos directos, escrito como la marca. El programa,
+; el instalador y la lista de aplicaciones instaladas siguen con `Nombre`.
+#define Acceso      "BIMnemo"
 #define Publicador  "CM Educativa"
 #define Web         "https://github.com/CMEDUCATIVA/BIMNEMO"
 ; Los accesos directos NO apuntan al .bat: un .bat abre siempre una ventana de
@@ -122,17 +125,24 @@ Type: filesandordirs; Name: "{localappdata}\BIMNEMO\chromium-profile"
 Type: filesandordirs; Name: "{app}\chromium-profile"
 Type: filesandordirs; Name: "{app}\perfil-chrome"
 
+; Los accesos directos de antes se llamaban «BIMNEMO». Windows no distingue
+; mayúsculas en los nombres de fichero: si el viejo sigue ahí, el nuevo se
+; escribe encima y conserva «BIMNEMO». Se borran antes para que quede
+; «BIMnemo».
+Type: files; Name: "{userdesktop}\BIMNEMO.lnk"
+Type: files; Name: "{group}\BIMNEMO.lnk"
+
 [Icons]
 ; Sin `IconFilename`: el icono ya va **dentro** de `bimnemo.exe`, sellado al
 ; empaquetar. Referenciar un `.ico` suelto además sería tener el mismo icono
 ; en dos sitios y un día uno de los dos se quedaría viejo.
-Name: "{group}\{#Nombre}"; Filename: "{app}\{#Ejecutable}"; \
+Name: "{group}\{#Acceso}"; Filename: "{app}\{#Ejecutable}"; \
     Parameters: "{#Argumentos}"; WorkingDir: "{app}"
 Name: "{group}\Cómo actualizar"; Filename: "{app}\como_actualizar.md"
 Name: "{group}\Diagnóstico (con consola)"; Filename: "{app}\BIMNEMO.bat"; \
     Parameters: "--consola"; WorkingDir: "{app}"
 Name: "{group}\Desinstalar {#Nombre}"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\{#Nombre}"; Filename: "{app}\{#Ejecutable}"; \
+Name: "{userdesktop}\{#Acceso}"; Filename: "{app}\{#Ejecutable}"; \
     Parameters: "{#Argumentos}"; WorkingDir: "{app}"; Tasks: escritorio
 
 [Run]
