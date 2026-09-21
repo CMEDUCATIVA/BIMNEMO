@@ -80,13 +80,36 @@ COLORES = (
     "#64748b",  # slate
 )
 
-#: El color del resaltado de la búsqueda.
+#: El color de la búsqueda y de las sinapsis, según el fondo.
 #:
-#: Ámbar a propósito, y no el azul de marca: el azul es el color del tipo de
-#: entidad más común, así que un acierto azul sobre un nodo azul no se
-#: distinguía de sus vecinos. El ámbar no lo usa ningún tipo hasta el séptimo
-#: y es el que más salta sobre un fondo oscuro.
+#: Ámbar y no el azul de marca: el azul es el color que el reparto por
+#: frecuencia le da al tipo de entidad más común, así que un acierto azul
+#: sobre un nodo azul no se distinguía de sus vecinos.
+#:
+#: Pero el ámbar solo salta sobre un fondo oscuro. Sobre uno claro se lava —
+#: una línea fina de dos píxeles desaparece— y ahí hace falta un naranja
+#: quemado, que es el mismo tono con la luz que el fondo claro le quita.
 AMBAR = "#fbbf24"
+NARANJA = "#ea580c"
+
+
+def _fondo_claro() -> bool:
+    """¿El lienzo es claro?
+
+    Se mide la luminosidad del color de fondo en vez de comparar con la
+    paleta clara. Así sigue acertando el día que haya un tema más: lo que
+    decide si un naranja se lee no es cómo se llame el tema, es cuánta luz
+    tiene detrás.
+    """
+    fondo = QColor(tema.ACTUAL.fondo)
+    return (
+        0.2126 * fondo.redF() + 0.7152 * fondo.greenF() + 0.0722 * fondo.blueF()
+    ) > 0.5
+
+
+def color_pulso() -> QColor:
+    """El color con el que se pintan la búsqueda y las sinapsis."""
+    return QColor(NARANJA if _fondo_claro() else AMBAR)
 
 #: 16 ms ≈ 60 fotogramas por segundo.
 PASO_MS = 16
@@ -591,13 +614,13 @@ class Grafo(QWidget):
 
             if casa:
                 # Halo ámbar alrededor del acierto, y anillo del mismo color.
-                halo = QColor(AMBAR)
+                halo = QColor(color_pulso())
                 halo.setAlpha(90)
                 pintor.setPen(Qt.NoPen)
                 pintor.setBrush(halo)
                 pintor.drawEllipse(centro, radio + 7, radio + 7)
                 pintor.setBrush(color)
-                pintor.setPen(QPen(QColor(AMBAR), 2.2))
+                pintor.setPen(QPen(color_pulso(), 2.2))
             elif i == self._elegido:
                 pintor.setPen(QPen(QColor(tema.ACTUAL.texto), 2.0))
             elif i == self._encima:
@@ -649,7 +672,7 @@ class Grafo(QWidget):
                 # Pastilla ámbar con el texto del color del fondo: se lee
                 # igual de bien en tema claro y en oscuro, y no hay que
                 # elegir un color de texto por tema.
-                pintor.setBrush(QColor(AMBAR))
+                pintor.setBrush(color_pulso())
                 pintor.drawRoundedRect(fondo, 3, 3)
                 pintor.setPen(QColor(tema.ACTUAL.fondo))
             else:
@@ -683,7 +706,7 @@ class Grafo(QWidget):
 
             # Se apaga al llegar: sin esto, el impulso desaparece de golpe
             # en el nodo de destino y parece un fallo de dibujo.
-            color = QColor(AMBAR)
+            color = color_pulso()
             color.setAlpha(int(235 * (1.0 - avance ** 3)))
 
             pluma = QPen(color, max(1.6, 2.6 * k))
