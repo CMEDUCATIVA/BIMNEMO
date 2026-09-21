@@ -201,3 +201,69 @@ def test_el_idioma_de_una_instalacion_nueva_es_el_espanol():
     raiz = Path(__file__).resolve().parents[3]
     lineas = (raiz / "env.example").read_text(encoding="utf-8").splitlines()
     assert "SUMMARY_LANGUAGE=Spanish" in lineas
+
+
+# --- Cambiar el modelo de embeddings -----------------------------------------
+
+CATALOGO_EMBEDDING = [
+    {"key": "openai", "label": "OpenAI", "binding": "openai",
+     "host": "https://api.openai.com/v1", "models": ["text-embedding-3-large"]},
+    {"key": "gemini", "label": "Gemini", "binding": "gemini",
+     "host": "https://generativelanguage.googleapis.com",
+     "models": ["gemini-embedding-001"]},
+]
+
+
+def _con_memorias_de_openai(configuracion, hay_vectores=True):
+    configuracion.secciones["embedding"].poner_catalogo(CATALOGO_EMBEDDING)
+    configuracion._pintar_valores({
+        "embedding": {"provider": "openai", "binding": "openai",
+                      "model": "text-embedding-3-large"},
+        "has_vectors": hay_vectores,
+    })
+
+
+def _elegir_gemini(configuracion):
+    proveedor = configuracion.secciones["embedding"].proveedor
+    proveedor.setCurrentIndex(proveedor.findData("gemini"))
+
+
+def test_cambiar_el_embedding_con_memorias_pide_confirmacion(configuracion, ventana, monkeypatch):
+    """Guardarlo y reiniciar dejaba BIMNEMO sin abrir, sin decir por qué."""
+    from lightrag.api.bimnemo.nativo import pantalla_configuracion as modulo
+
+    enviado, preguntas = [], []
+    ventana.motor.post = lambda *a, **k: enviado.append(a)
+    monkeypatch.setattr(
+        modulo.QMessageBox, "question",
+        lambda *a, **k: (preguntas.append(a[2]), modulo.QMessageBox.No)[1],
+    )
+    _con_memorias_de_openai(configuracion)
+    _elegir_gemini(configuracion)
+    configuracion._guardar()
+
+    assert "«text-embedding-3-large»" in preguntas[0]
+    assert "«gemini-embedding-001»" in preguntas[0]
+    assert enviado == []  # dijo que no: no se guarda nada
+
+
+def test_si_confirma_se_guarda(configuracion, ventana, monkeypatch):
+    from lightrag.api.bimnemo.nativo import pantalla_configuracion as modulo
+
+    enviado = []
+    ventana.motor.post = lambda *a, **k: enviado.append(a)
+    monkeypatch.setattr(modulo.QMessageBox, "question", lambda *a, **k: modulo.QMessageBox.Yes)
+    _con_memorias_de_openai(configuracion)
+    _elegir_gemini(configuracion)
+    configuracion._guardar()
+
+    assert enviado
+
+
+def test_sin_memorias_o_sin_cambiarlo_no_pregunta(configuracion):
+    _con_memorias_de_openai(configuracion)
+    assert configuracion.cambio_de_embedding() is None
+
+    _con_memorias_de_openai(configuracion, hay_vectores=False)
+    _elegir_gemini(configuracion)
+    assert configuracion.cambio_de_embedding() is None

@@ -27,6 +27,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from lightrag.api.bimnemo import embedding_anterior
 from lightrag.api.bimnemo.runtime import (
     CONFIGURABLE_ENV_KEYS,
     RESTART_EXIT_CODE as _RESTART_EXIT_CODE,
@@ -75,6 +76,13 @@ class SettingsResponse(BaseModel):
     )
     restart_required: bool = Field(
         description="Lo guardado difiere de lo que el motor está usando ahora"
+    )
+    has_vectors: bool = Field(
+        default=False,
+        description=(
+            "Alguna memoria tiene vectores: cambiar el modelo de embeddings "
+            "obliga a reconstruirlos o el motor no arrancará"
+        ),
     )
 
 
@@ -257,6 +265,9 @@ def create_bimnemo_settings_routes(rag, api_key: Optional[str] = None) -> APIRou
             rerank=_section_view(values, "rerank"),
             language=values.get("SUMMARY_LANGUAGE", "") or DEFAULT_LANGUAGE,
             restart_required=_settings_differ_from_running(values),
+            has_vectors=embedding_anterior.hay_vectores(
+                Path(getattr(rag, "working_dir", "") or "rag_storage")
+            ),
         )
 
     @router.post(
@@ -287,6 +298,14 @@ def create_bimnemo_settings_routes(rag, api_key: Optional[str] = None) -> APIRou
                 status_code=400,
                 detail=f"Claves no configurables desde aquí: {', '.join(unknown)}",
             )
+
+        try:
+            # Antes de pisarlo: el modelo con el que se hicieron los vectores
+            # es la única vuelta atrás si el nuevo no arranca.
+            if embedding_anterior.recordar(_env_path(), updates):
+                logger.info("BIMNEMO: apuntado el modelo de embeddings anterior")
+        except OSError as exc:
+            logger.warning("BIMNEMO: no se pudo apuntar el embedding anterior: %s", exc)
 
         try:
             changed = write_env(_env_path(), updates)

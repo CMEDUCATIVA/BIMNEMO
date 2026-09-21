@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
@@ -306,6 +307,10 @@ class PantallaConfiguracion(Pantalla):
             "Aquí se elige cuál y se pega la clave.",
         )
         self.motor = motor
+        # El embedding con el que arrancó la pantalla y si ya hay vectores
+        # hechos con él: cambiarlo entonces deja el motor sin arrancar.
+        self._embedding_guardado: tuple[str, str] = ("", "")
+        self._hay_vectores = False
 
         self.aviso = Aviso()
         self.anadir(self.aviso)
@@ -422,6 +427,12 @@ class PantallaConfiguracion(Pantalla):
         for clave, seccion in self.secciones.items():
             seccion.poner_valores(datos.get(clave) or {})
         self._poner_idioma(str(datos.get("language") or ""))
+        embedding = datos.get("embedding") or {}
+        self._embedding_guardado = (
+            str(embedding.get("binding") or ""),
+            str(embedding.get("model") or ""),
+        )
+        self._hay_vectores = bool(datos.get("has_vectors"))
 
         if datos.get("restart_required"):
             self.estado.informar(
@@ -450,7 +461,46 @@ class PantallaConfiguracion(Pantalla):
 
     # -- acciones -----------------------------------------------------------
 
+    def cambio_de_embedding(self) -> Optional[tuple[str, str]]:
+        """``(modelo actual, modelo nuevo)`` si se va a cambiar con vectores hechos."""
+        nuevo = self.secciones["embedding"].a_peticion()
+        binding, modelo = self._embedding_guardado
+        if not self._hay_vectores or not modelo:
+            return None
+        if (nuevo["binding"], nuevo["model"]) == (binding, modelo):
+            return None
+        return modelo, nuevo["model"] or nuevo["provider"]
+
+    def _confirmar_cambio_de_embedding(self) -> bool:
+        """Avisa antes de guardar un embedding que no casa con las memorias.
+
+        Guardarlo no rompe nada todavía; lo rompe el reinicio: el motor no
+        arranca con vectores de otro modelo. Mejor decirlo aquí, cuando aún
+        se puede no hacerlo, que en un error al abrir.
+        """
+        cambio = self.cambio_de_embedding()
+        if cambio is None:
+            return True
+        actual, nuevo = cambio
+        respuesta = QMessageBox.question(
+            self,
+            "Cambiar el modelo de embeddings",
+            f"Tus memorias están hechas con «{actual}». Los vectores de un "
+            f"modelo no sirven para otro: con «{nuevo}», al reiniciar el "
+            "motor no podrá abrirlas.\n\n"
+            "Para usarlo habría que reconstruir los índices, lo que vuelve a "
+            "enviar todo el texto al proveedor nuevo (gasta saldo). Si BIMNEMO "
+            f"no arranca, te ofrecerá volver a «{actual}».\n\n"
+            "¿Guardar igualmente?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return respuesta == QMessageBox.Yes
+
     def _guardar(self) -> None:
+        if not self._confirmar_cambio_de_embedding():
+            self.estado.informar("No se ha guardado nada.")
+            return
         cuerpo: dict[str, Any] = {
             clave: seccion.a_peticion() for clave, seccion in self.secciones.items()
         }

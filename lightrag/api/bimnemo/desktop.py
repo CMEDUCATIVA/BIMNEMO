@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -139,18 +140,142 @@ def start_server(host: str, port: int, *, quiet: bool) -> subprocess.Popen:
 
     creation_flags = 0
     stdout = None
-    if quiet and os.name == "nt":
-        # Sin ventana de consola: es una aplicación, no un script.
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        stdout = subprocess.DEVNULL
+    if quiet:
+        if os.name == "nt":
+            # Sin ventana de consola: es una aplicación, no un script.
+            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        # A un fichero y no a la nada: sin consola, es lo único que queda para
+        # saber por qué el motor no arrancó (ver avisar_fallo_de_arranque).
+        try:
+            stdout = open(registro_del_motor(), "w", encoding="utf-8", errors="replace")
+        except OSError:
+            stdout = subprocess.DEVNULL
 
-    return subprocess.Popen(
-        _server_command(host, port, quiet),
-        env=env,
-        stdout=stdout,
-        stderr=subprocess.STDOUT if stdout is not None else None,
-        creationflags=creation_flags,
+    try:
+        return subprocess.Popen(
+            _server_command(host, port, quiet),
+            env=env,
+            stdout=stdout,
+            stderr=subprocess.STDOUT if stdout is not None else None,
+            creationflags=creation_flags,
+        )
+    finally:
+        # El hijo ya tiene su copia del fichero; la nuestra sobra.
+        if stdout not in (None, subprocess.DEVNULL):
+            stdout.close()
+
+
+#: Lo que el motor dijo en su último arranque. Se pisa en cada uno.
+REGISTRO_DEL_MOTOR = "bimnemo_motor.log"
+
+
+def registro_del_motor() -> Path:
+    return _repo_root() / REGISTRO_DEL_MOTOR
+
+
+def _leer_registro(maximo: int = 200_000) -> str:
+    """El final del registro del motor, o vacío si no hay."""
+    try:
+        with registro_del_motor().open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - maximo))
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+_ERROR_FINAL = re.compile(r"^[A-Za-z_][\w.]*(?:Error|Exception|Exit)\b.*$", re.MULTILINE)
+
+
+def _ultimo_error(registro: str) -> str:
+    """La línea del error con que terminó la traza, o la última que haya."""
+    errores = _ERROR_FINAL.findall(registro)
+    if errores:
+        return errores[-1].strip()[:600]
+    lineas = [l.strip() for l in registro.splitlines() if l.strip()]
+    return lineas[-1][:600] if lineas else ""
+
+
+TITULO_FALLO = "BIMNEMO no ha podido arrancar"
+
+
+def _dialogo(texto: str, *, pregunta: bool = False) -> bool:
+    """Un cuadro de Windows. Con ``pregunta``, Sí/No y devuelve si fue Sí.
+
+    Es el de Windows y no uno de Qt a propósito: sirve antes de que exista la
+    ventana y desde el hilo del supervisor, y la ventana corre sin consola,
+    así que un ``print`` aquí no lo lee nadie.
+    """
+    print(texto, file=sys.stderr)
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        ICONO_ERROR, ICONO_PREGUNTA, SI_NO, DELANTE = 0x10, 0x20, 0x4, 0x10000
+        estilo = DELANTE | ((ICONO_PREGUNTA | SI_NO) if pregunta else ICONO_ERROR)
+        respuesta = ctypes.windll.user32.MessageBoxW(None, texto, TITULO_FALLO, estilo)
+    except (OSError, AttributeError):
+        return False
+    return pregunta and respuesta == 6  # IDYES
+
+
+def avisar_fallo_de_arranque(motivo: str = "") -> bool:
+    """Explica por qué el motor no arrancó. Devuelve True si quedó arreglado.
+
+    El caso que más se da tiene arreglo en el acto: se cambió el modelo de
+    embeddings y las memorias tienen vectores del anterior. Si ese anterior
+    está apuntado, se ofrece volver a él.
+    """
+    from lightrag.api.bimnemo import embedding_anterior
+
+    registro = _leer_registro()
+    modelos = embedding_anterior.desajuste(registro)
+    env = Path.cwd() / ".env"
+
+    if modelos is not None:
+        de_los_vectores, configurado = modelos
+        explicacion = (
+            "Tus memorias se hicieron con el modelo de embeddings "
+            f"«{de_los_vectores or 'anterior'}», y ahora está configurado "
+            f"«{configurado or 'otro'}».\n\n"
+            "Los vectores de un modelo no sirven para otro, así que el motor no "
+            "arranca para no darte resultados equivocados. Tus memorias no se "
+            "han tocado."
+        )
+        if embedding_anterior.puede_volver(env, de_los_vectores):
+            si = _dialogo(
+                explicacion
+                + f"\n\n¿Volver a «{de_los_vectores or 'el anterior'}»? "
+                "BIMNEMO se abrirá como antes.\n\n"
+                "Para cambiar de modelo de verdad hay que reconstruir los índices "
+                "con el nuevo, y eso vuelve a enviar todo el texto al proveedor "
+                "(gasta saldo).",
+                pregunta=True,
+            )
+            if si:
+                try:
+                    embedding_anterior.restaurar(env)
+                    return True
+                except OSError as exc:
+                    _dialogo(f"No se pudo escribir {env}:\n{exc}")
+            return False
+        _dialogo(
+            explicacion
+            + "\n\nPara abrirlas, vuelve a poner ese modelo en EMBEDDING_MODEL "
+            f"(y su proveedor) en:\n{env}\n\n"
+            "O reconstruye los índices con el modelo nuevo, lo que vuelve a "
+            "enviar todo el texto al proveedor (gasta saldo)."
+        )
+        return False
+
+    ultimo = _ultimo_error(registro)
+    _dialogo(
+        (motivo or "El motor de BIMNEMO se cerró al arrancar.")
+        + (f"\n\nLo último que dijo:\n{ultimo}" if ultimo else "")
+        + f"\n\nEl registro completo está en:\n{registro_del_motor()}"
     )
+    return False
 
 
 def wait_for_server(
@@ -371,6 +496,25 @@ def esperar_a_que_termine(pid: int, segundos: float = ESPERA_RELANZADO_SEGUNDOS)
         time.sleep(0.2)
 
 
+def _arrancar(base_url: str, args) -> subprocess.Popen | None:
+    """Arranca el motor; si no puede, lo explica y, si se arregla, reintenta."""
+    for _ in range(2):
+        print(f"Arrancando el motor en {base_url} …")
+        server = start_server(args.host, args.port, quiet=not args.consola)
+        if wait_for_server(base_url, server, SERVER_TIMEOUT_SECONDS):
+            print("Motor listo.")
+            return server
+        if server.poll() is None:
+            server.terminate()
+            avisar_fallo_de_arranque(
+                f"El motor no respondió en {SERVER_TIMEOUT_SECONDS:.0f} s."
+            )
+            return None
+        if not avisar_fallo_de_arranque():
+            return None
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     if _relanzar_como_bimnemo(list(sys.argv[1:] if argv is None else argv)):
         return 0
@@ -389,31 +533,16 @@ def main(argv: list[str] | None = None) -> int:
     elif port_is_open(args.host, args.port):
         # Puerto ocupado por algo que no contesta a /health. Arrancar encima
         # fallaría con un error de socket que no dice nada útil.
-        print(
+        _dialogo(
             f"El puerto {args.port} está ocupado por otro programa.\n"
-            f"Cierra ese programa o usa --port con otro número.",
-            file=sys.stderr,
+            f"Cierra ese programa y vuelve a abrir BIMNEMO."
         )
         return 1
     else:
         asegurar_env()
-        print(f"Arrancando el motor en {base_url} …")
-        server = start_server(args.host, args.port, quiet=not args.consola)
-        if not wait_for_server(base_url, server, SERVER_TIMEOUT_SECONDS):
-            if server.poll() is not None:
-                print(
-                    "El motor se cerró al arrancar. Vuelve a lanzarlo con "
-                    "--consola para ver el error.",
-                    file=sys.stderr,
-                )
-            else:
-                print(
-                    f"El motor no respondió en {SERVER_TIMEOUT_SECONDS:.0f} s.",
-                    file=sys.stderr,
-                )
-                server.terminate()
+        server = _arrancar(base_url, args)
+        if server is None:
             return 1
-        print("Motor listo.")
 
     if args.solo_motor:
         print(f"BIMNEMO  {base_url}\nSwagger  {base_url}/docs")
@@ -432,11 +561,9 @@ def main(argv: list[str] | None = None) -> int:
     if not nativo.disponible():
         # Sin Qt no hay ventana. Antes se caía a la interfaz web en Chrome;
         # ya no existe, así que se dice qué falta en vez de abrir nada.
-        print(
+        _dialogo(
             "La ventana de BIMNEMO necesita Qt (PySide6) y no está instalado.\n"
-            "    pip install pyside6-essentials\n"
-            f"El motor sigue en {base_url} para usarlo desde la API.",
-            file=sys.stderr,
+            "    pip install pyside6-essentials"
         )
         _shutdown(server)
         return 1
@@ -557,22 +684,33 @@ def supervise(
             print("Motor listo.")
             continue
 
+        if server.poll() is not None and _es_desajuste_de_embeddings():
+            # Reintentar no sirve: fallará igual hasta que cambie el .env.
+            if avisar_fallo_de_arranque():
+                consecutive_failures = 0
+                continue
+            window.terminate()
+            break
+
         if time.monotonic() - started_at < FAST_FAILURE_SECONDS:
             consecutive_failures += 1
         else:
             consecutive_failures = 1
 
         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-            print(
-                f"El motor no arranca tras {consecutive_failures} intentos.\n"
-                "Revisa la configuración del .env y vuelve a lanzar BIMNEMO "
-                "con --consola para ver el error.",
-                file=sys.stderr,
+            avisar_fallo_de_arranque(
+                f"El motor no arranca tras {consecutive_failures} intentos."
             )
             window.terminate()
             break
 
     return server
+
+
+def _es_desajuste_de_embeddings() -> bool:
+    from lightrag.api.bimnemo import embedding_anterior
+
+    return embedding_anterior.desajuste(_leer_registro()) is not None
 
 
 def _shutdown(server: subprocess.Popen | None) -> None:
