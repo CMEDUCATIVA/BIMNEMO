@@ -38,11 +38,11 @@ import numpy as np
 #: lóbulo frontal, el temporal, el cerebelo y el tronco.
 PIEZAS: tuple[tuple[float, float, float, float], ...] = (
     (-0.02, -0.22, 0.82, 0.54),  # cerebro, el bulto grande de arriba
-    (-0.58, 0.02, 0.38, 0.38),   # lóbulo frontal, el morro de delante
-    (-0.34, 0.34, 0.40, 0.23),   # lóbulo temporal, por debajo del frontal
-    (0.60, 0.04, 0.34, 0.34),    # lóbulo occipital, la nuca
-    (0.54, 0.50, 0.30, 0.21),    # cerebelo, el bulto de atrás abajo
-    (0.16, 0.60, 0.13, 0.30),    # tronco, bajando
+    (-0.58, 0.02, 0.38, 0.38),  # lóbulo frontal, el morro de delante
+    (-0.34, 0.34, 0.40, 0.23),  # lóbulo temporal, por debajo del frontal
+    (0.60, 0.04, 0.34, 0.34),  # lóbulo occipital, la nuca
+    (0.54, 0.50, 0.30, 0.21),  # cerebelo, el bulto de atrás abajo
+    (0.16, 0.60, 0.13, 0.30),  # tronco, bajando
 )
 
 #: Cuánto tira el contorno del nodo que se ha salido.

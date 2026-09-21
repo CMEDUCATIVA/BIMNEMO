@@ -175,6 +175,10 @@ class Grafo(QWidget):
         self.setMinimumHeight(160)
         self.setMouseTracking(True)
         self.setCursor(Qt.OpenHandCursor)
+        # La rueda solo es suya cuando alguien ha pulsado dentro. Al pasar
+        # por encima desplazándose por el panel, el grafo no se queda con
+        # ella: `wheelEvent` la deja seguir hacia el área que desplaza.
+        self.setFocusPolicy(Qt.ClickFocus)
 
         self._nodos: list[dict[str, Any]] = []
         self._aristas: list[tuple[int, int]] = []
@@ -799,6 +803,18 @@ class Grafo(QWidget):
     # -- gestos -------------------------------------------------------------
 
     def wheelEvent(self, evento: QWheelEvent) -> None:  # noqa: N802
+        """Acerca y aleja **solo si el grafo está en uso**.
+
+        Bajando por el panel con la rueda, el puntero cruza el lienzo sin
+        remedio —ocupa la primera pantalla entera—, y si el grafo se quedara
+        la rueda el panel se pararía en seco y el grafo daría un salto de
+        zoom que nadie pidió. Se hace suya al pulsarlo, y se suelta al
+        pulsar fuera.
+        """
+        if not self.hasFocus():
+            evento.ignore()
+            return
+
         self._vista_tocada = True
         factor = 1.0 + evento.angleDelta().y() / 1200.0
         antes = self._a_mundo(evento.position())

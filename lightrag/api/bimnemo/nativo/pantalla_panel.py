@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import QEvent, Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -45,7 +45,15 @@ from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo.piezas import Aviso, Fluida, Tarjeta
 
 #: Por debajo de esto, las dos columnas se apilan.
-ANCHO_MINIMO_DOS_COLUMNAS = 1120
+#: Medido, no elegido: la columna del grafo pide 1.008 px —su barra de
+#: controles— y la de datos 296, más el espacio entre ellas y los márgenes.
+#: Por debajo de esto las dos columnas no caben, y lo que sobra se recorta
+#: por la derecha en vez de encogerse.
+#: A partir de qué ancho caben las cuatro tarjetas de cifra en una fila, en
+#: dos, o en una sola. Es lo único que cambia al encoger la ventana: el grafo
+#: manda siempre en la primera sección, a todo lo ancho.
+ANCHO_CUATRO_CIFRAS = 1000
+ANCHO_DOS_CIFRAS = 560
 
 #: Ancho de la columna de datos. Fijo y no proporcional: el grafo es lo que
 #: se viene a ver, así que todo lo que sobra al ensanchar la ventana se lo
@@ -306,10 +314,11 @@ def _campo(rotulo: str, control: QWidget, ancho: int = 0) -> QWidget:
 
 
 class PantallaPanel(QWidget):
-    #: Han pulsado una memoria en la tabla: hay que abrirla.
-    memoria_elegida = Signal(str)
     #: Han pulsado una categoría: hay que ir a Archivos con ese filtro.
     categoria_elegida = Signal(str)
+    #: Lo que ocupa la memoria abierta, recién leído. Lo escucha el carril
+    #: para enseñarlo al pie sin pedirlo otra vez.
+    almacenamiento = Signal(dict)
 
     def __init__(self, motor: Motor) -> None:
         super().__init__()
@@ -323,10 +332,14 @@ class PantallaPanel(QWidget):
         # Con desplazamiento: el panel ya no cabe en una pantalla —grafo,
         # cifras, reparto del disco, memorias, categorías y tipos—, y lo que
         # no cabe tiene que poder alcanzarse.
-        area = QScrollArea()
+        self.area = QScrollArea()
+        area = self.area
         area.setWidgetResizable(True)
         area.setFrameShape(QFrame.NoFrame)
-        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # La horizontal, solo si hace falta: en una ventana estrecha la barra
+        # del grafo no se encoge más, y es mejor poder desplazarse hasta ella
+        # que perderla recortada contra el borde.
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         raiz.addWidget(area)
 
         dentro = QWidget()
@@ -334,35 +347,32 @@ class PantallaPanel(QWidget):
         columna.setContentsMargins(32, 28, 32, 24)
         columna.setSpacing(14)
         area.setWidget(dentro)
+        # El alto de referencia es el del hueco visible, no el de la pantalla:
+        # son distintos en cuanto aparece una barra de desplazamiento, y es
+        # el visible el que decide dónde cae el pliegue.
+        area.viewport().installEventFilter(self)
 
-        titulo = QLabel("Panel")
-        titulo.setObjectName("titulo")
-        columna.addWidget(titulo)
+        self.titulo_pantalla = QLabel("Panel")
+        self.titulo_pantalla.setObjectName("titulo")
+        columna.addWidget(self.titulo_pantalla)
 
         self.aviso = Aviso()
         columna.addWidget(self.aviso)
 
-        self.rejilla = QGridLayout()
-        self.rejilla.setContentsMargins(0, 0, 0, 0)
-        self.rejilla.setHorizontalSpacing(16)
-        self.rejilla.setVerticalSpacing(16)
-        arriba = QWidget()
-        arriba.setObjectName("fila")
-        arriba.setLayout(self.rejilla)
-        # Alto mínimo: dentro de un área con desplazamiento, el grafo se
-        # encogería hasta su tamaño natural —unos pocos píxeles— y dejaría
-        # de ser la pieza principal de la pantalla.
-        arriba.setMinimumHeight(ALTO_MINIMO_GRAFO)
-        columna.addWidget(arriba)
+        self.columna_contenido = columna
 
+        # PRIMERA SECCIÓN: el grafo, solo y a todo lo ancho. Es a lo que se
+        # viene al panel, así que no comparte pantalla con nada —tampoco con
+        # la ventana grande—. Las cifras y el resto van debajo.
+        self.primera_seccion = self._columna_grafo()
+        self.primera_seccion.setMinimumHeight(ALTO_MINIMO_GRAFO)
+        columna.addWidget(self.primera_seccion)
+
+        # SEGUNDA SECCIÓN: los datos, uno detrás de otro.
+        columna.addWidget(self._columna_datos())
         columna.addWidget(self._almacenamiento())
-        columna.addWidget(self._memorias())
         columna.addWidget(self._categorias_y_tipos())
         columna.addStretch(1)
-
-        self.columna_grafo = self._columna_grafo()
-        self.columna_datos = self._columna_datos()
-        self._colocar_columnas(apilado=False)
 
         # El grafo late solo cada cinco segundos, y además cada vez que
         # alguien usa la memoria por la API.
@@ -423,47 +433,36 @@ class PantallaPanel(QWidget):
 
     # -- columnas -----------------------------------------------------------
 
-    def _colocar_columnas(self, apilado: bool) -> None:
-        """Pone las dos columnas al lado o una encima de otra."""
-        if self._apilado == apilado:
-            return
-        self._apilado = apilado
-
-        self.rejilla.removeWidget(self.columna_grafo)
-        self.rejilla.removeWidget(self.columna_datos)
-
-        if apilado:
-            self.rejilla.addWidget(self.columna_grafo, 0, 0)
-            self.rejilla.addWidget(self.columna_datos, 1, 0)
-            self.rejilla.setColumnStretch(0, 1)
-            self.rejilla.setColumnStretch(1, 0)
-            self.columna_datos.setMaximumWidth(16777215)
-            # Apiladas, las tarjetas se reparten a lo ancho en vez de
-            # estirarse una debajo de otra.
-            self._repartir_cifras(4)
-            # Y **no se quedan con alto del grafo**: apilado, la primera
-            # sección es el grafo, que es a lo que se viene. Las tarjetas
-            # toman su alto natural y el grafo se queda con el resto.
-            self.columna_datos.setFixedHeight(ALTO_CIFRAS_APILADAS)
-            self.rejilla.setRowStretch(0, 1)
-            self.rejilla.setRowStretch(1, 0)
-        else:
-            self.rejilla.addWidget(self.columna_grafo, 0, 0)
-            self.rejilla.addWidget(self.columna_datos, 0, 1)
-            self.rejilla.setColumnStretch(0, 1)
-            self.rejilla.setColumnStretch(1, 0)
-            self.columna_datos.setFixedWidth(ANCHO_DATOS)
-            self.columna_datos.setMaximumHeight(16777215)
-            self.rejilla.setRowStretch(0, 1)
-            self.rejilla.setRowStretch(1, 0)
-            self._repartir_cifras(1)
-
-        self.columna_grafo.show()
-        self.columna_datos.show()
-
     def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre de Qt)
         super().resizeEvent(evento)
-        self._colocar_columnas(self.width() < ANCHO_MINIMO_DOS_COLUMNAS)
+        ancho = self.width()
+        if ancho >= ANCHO_CUATRO_CIFRAS:
+            self._repartir_cifras(4)
+        elif ancho >= ANCHO_DOS_CIFRAS:
+            self._repartir_cifras(2)
+        else:
+            self._repartir_cifras(1)
+
+    def _primera_seccion_a_pantalla(self) -> None:
+        """El grafo y sus cifras ocupan la pantalla entera; el resto, debajo.
+
+        Es a lo que se viene al panel. Con todo apilado en la misma pantalla,
+        cada bloque nuevo le robaba alto al grafo hasta dejarlo en una franja
+        — y lo que se pierde ahí no se recupera desplazándose, porque el
+        grafo se dibuja en el hueco que le quede.
+
+        Lo demás empieza justo bajo el pliegue: la barra de desplazamiento
+        dice que hay más, y se llega bajando.
+        """
+        margenes = self.columna_contenido.contentsMargins()
+        separacion = self.columna_contenido.spacing()
+
+        encabezado = margenes.top() + self.titulo_pantalla.height() + separacion
+        if not self.aviso.isHidden():
+            encabezado += self.aviso.height() + separacion
+
+        alto = self.area.viewport().height() - encabezado - margenes.bottom()
+        self.primera_seccion.setFixedHeight(max(ALTO_MINIMO_GRAFO, alto))
 
     # -- columna izquierda: el grafo ----------------------------------------
 
@@ -497,22 +496,15 @@ class PantallaPanel(QWidget):
 
     def _almacenamiento(self) -> QWidget:
         """El reparto del disco por categoría, sumando todas las memorias."""
-        tarjeta, self.pista_almacenado = self._seccion("disco", "Almacenamiento por categoría")
+        tarjeta, self.pista_almacenado = self._seccion(
+            "disco", "Almacenamiento por categoría"
+        )
 
         self.medidor = panel_piezas.Medidor()
         tarjeta.anadir(self.medidor)
 
         self.leyenda = panel_piezas.Leyenda()
         tarjeta.anadir(self.leyenda)
-        return tarjeta
-
-    def _memorias(self) -> QWidget:
-        tarjeta, pista = self._seccion("memorias", "Memorias")
-        pista.setText("Pulsa una para trabajar en ella")
-
-        self.tabla_memorias = panel_piezas.TablaMemorias()
-        self.tabla_memorias.elegida.connect(self.memoria_elegida.emit)
-        tarjeta.anadir(self.tabla_memorias)
         return tarjeta
 
     def _categorias_y_tipos(self) -> QWidget:
@@ -653,11 +645,17 @@ class PantallaPanel(QWidget):
         return pie
 
     def eventFilter(self, objeto, evento):  # noqa: N802 (nombre de Qt)
-        """Recoloca la ficha cuando el lienzo cambia de tamaño."""
-        from PySide6.QtCore import QEvent
+        """Dos vigilados, y solo puede haber un filtro por clase.
 
-        if objeto is self.grafo and evento.type() == QEvent.Resize:
-            self.ficha.recolocar()
+        El lienzo, para recolocar la ficha flotante cuando cambia de tamaño;
+        y el hueco visible del desplazamiento, para que la primera sección
+        siga ocupando exactamente una pantalla.
+        """
+        if evento.type() == QEvent.Resize:
+            if objeto is self.grafo:
+                self.ficha.recolocar()
+            elif objeto is self.area.viewport():
+                self._primera_seccion_a_pantalla()
         return super().eventFilter(objeto, evento)
 
     def _soltar_seleccion(self) -> None:
@@ -670,17 +668,23 @@ class PantallaPanel(QWidget):
         self.ficha.ocultar()
 
     def _barra(self) -> QWidget:
+        """Los controles del grafo, en disposición fluida.
+
+        Con una fila normal, sus seis controles pedían 1.008 píxeles y por
+        debajo de eso la ventana sacaba barra de desplazamiento horizontal —
+        justo lo que no quieres al encoger. Fluida los pasa a una segunda
+        línea y el grafo sigue ocupando lo que haya.
+        """
         barra = QWidget()
         barra.setObjectName("fila")
-        fila = QHBoxLayout(barra)
-        fila.setContentsMargins(0, 2, 0, 2)
-        fila.setSpacing(10)
+        fila = Fluida(separacion=10, salto=8)
+        barra.setLayout(fila)
 
         self.entidad = QComboBox()
         self.entidad.setMinimumWidth(96)
         self.entidad.addItem("Todo el grafo", "*")
         self.entidad.currentIndexChanged.connect(self._cargar_grafo)
-        fila.addWidget(_campo("Entidad de partida", self.entidad), 2)
+        fila.addWidget(_campo("Entidad de partida", self.entidad, 240))
 
         self.profundidad = QComboBox()
         for valor, rotulo in PROFUNDIDADES:
@@ -713,8 +717,8 @@ class PantallaPanel(QWidget):
         self.busqueda.setMinimumWidth(96)
         self.busqueda.setPlaceholderText("Resaltar por nombre…")
         self.busqueda.textChanged.connect(self._buscar)
-        self.campo_busqueda = _campo("Buscar entidad", self.busqueda)
-        fila.addWidget(self.campo_busqueda, 2)
+        self.campo_busqueda = _campo("Buscar entidad", self.busqueda, 220)
+        fila.addWidget(self.campo_busqueda)
 
         acciones = QWidget()
         acciones.setObjectName("fila")
@@ -733,29 +737,19 @@ class PantallaPanel(QWidget):
         # El grupo de botones no se encoge ni se va de fila: ancho fijo y
         # al final. Lo que cede sitio al estrechar son los desplegables.
         caja_acciones = _campo("", acciones, 32 * 4 + 4 * 3)
-        fila.addWidget(caja_acciones, 0)
+        fila.addWidget(caja_acciones)
         return barra
 
     # -- columna derecha: los datos -----------------------------------------
 
     def _columna_datos(self) -> QWidget:
-        envoltorio = QScrollArea()
-        envoltorio.setWidgetResizable(True)
-        envoltorio.setFrameShape(QFrame.NoFrame)
-        envoltorio.setObjectName("conversacion")
-        envoltorio.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # Sin barra vertical: las cuatro tarjetas caben siempre porque se
-        # reparten el alto. Con ella, aparecía y desaparecía al redimensionar
-        # y movía el contenido de sitio.
-        envoltorio.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        dentro = QWidget()
-        dentro.setObjectName("fila")
-        # Rejilla y no columna: apiladas, las cuatro tarjetas en una sola
-        # columna salían larguísimas y sin forma. En rejilla se reparten en
-        # las columnas que quepan y conservan su proporción.
-        self.rejilla_cifras = QGridLayout(dentro)
-        self.rejilla_cifras.setContentsMargins(0, 0, 8, 0)
+        """Las cuatro cifras, en fila debajo del grafo."""
+        caja = QWidget()
+        caja.setObjectName("fila")
+        # Rejilla y no fila: al encoger la ventana las tarjetas pasan a dos
+        # columnas y luego a una, en vez de estrecharse hasta no leerse.
+        self.rejilla_cifras = QGridLayout(caja)
+        self.rejilla_cifras.setContentsMargins(0, 0, 0, 0)
         self.rejilla_cifras.setHorizontalSpacing(12)
         self.rejilla_cifras.setVerticalSpacing(12)
 
@@ -764,10 +758,8 @@ class PantallaPanel(QWidget):
             self.cifras[clave] = Cifra(icono_nombre, rotulo)
 
         self._columnas_cifras = 0
-        self._repartir_cifras(1)
-
-        envoltorio.setWidget(dentro)
-        return envoltorio
+        self._repartir_cifras(4)
+        return caja
 
     def _repartir_cifras(self, columnas: int) -> None:
         """Coloca las cuatro tarjetas en el número de columnas que se pida."""
@@ -789,17 +781,10 @@ class PantallaPanel(QWidget):
                 columna, 1 if columna < columnas else 0
             )
 
-        filas = (len(CIFRAS) - 1) // columnas + 1
-        # En una sola columna las tarjetas reparten el alto de la columna
-        # lateral; repartidas a lo ancho, no — ahí mandan su alto natural.
-        estirar = columnas == 1
+        # Sin estirar filas: aquí las tarjetas tienen el alto que piden. El
+        # que sobra es del grafo, que está arriba.
         for fila in range(5):
-            # Todas las filas con el mismo peso: las tarjetas salen del mismo
-            # alto y reparten entre ellas toda la columna, en vez de quedarse
-            # arriba con un hueco debajo.
-            self.rejilla_cifras.setRowStretch(
-                fila, 1 if (estirar and fila < filas) else 0
-            )
+            self.rejilla_cifras.setRowStretch(fila, 0)
 
     # -- datos --------------------------------------------------------------
 
@@ -831,6 +816,11 @@ class PantallaPanel(QWidget):
         self.resumen_grafo.setText("Cargando…")
         self.lista_tipos.poner([], 0)
         self.pista_tipos.setText("")
+        self.medidor.poner([], 0)
+        self.leyenda.poner([], 0)
+        self.rejilla_categorias.poner([], 0)
+        self.pista_almacenado.setText("")
+        self.pista_categorias.setText("")
 
     def retematizar(self) -> None:
         """El lienzo del grafo se pinta a mano: hay que pedirle que repinte."""
@@ -838,74 +828,60 @@ class PantallaPanel(QWidget):
 
     def refrescar(self) -> None:
         self.motor.get("/bimnemo/stats", self._pintar_cifras, self._fallo)
-        self.motor.get("/bimnemo/nemos/stats", self._pintar_agregado, None)
         self.motor.get("/bimnemo/stats/graph", self._pintar_grafo_cifras, None)
         self._cargar_grafo()
 
     def _pintar_cifras(self, datos: Any) -> None:
-        """Lo de ESTA memoria: la cuarta tarjeta y los tipos de archivo."""
+        """Todo el panel, con lo que hay en la memoria abierta.
+
+        Una sola lectura —`/bimnemo/stats` de esa memoria— alimenta las
+        cuatro cifras, el reparto del disco, el catálogo de categorías y los
+        tipos. Antes había otra que sumaba todas las memorias, y era la que
+        hacía que el panel no se enterara de a cuál estabas mirando.
+        """
         if not isinstance(datos, dict):
             return
         self.aviso.callar()
         memoria = datos.get("memory") or {}
         almacen = datos.get("storage") or {}
+        octetos = almacen.get("total_bytes")
 
+        en_uso = int(almacen.get("categories_in_use") or 0)
+        del_catalogo = int(almacen.get("categories_available") or 0)
+
+        self.cifras["archivos"].poner(
+            formato.numero(almacen.get("total_files")), "En esta memoria"
+        )
+        self.cifras["almacenado"].poner(
+            formato.tamano(octetos), "Bytes reales en disco"
+        )
+        self.cifras["categorias"].poner(
+            f"{en_uso} / {del_catalogo}", "En uso sobre el catálogo"
+        )
         self.cifras["memoria"].poner(
             formato.numero(memoria.get("total_documents")),
             f"{formato.numero(memoria.get('total_chunks'))} fragmentos indexados",
         )
 
-        # Los tipos SÍ son de la memoria abierta: es el detalle de dónde
-        # estás, no el inventario general.
-        tipos = almacen.get("types") or []
-        self.pista_tipos.setText(f"{len(tipos)} tipo" + ("" if len(tipos) == 1 else "s"))
-        self.lista_tipos.poner(tipos, almacen.get("total_bytes"))
-
-        fallo = memoria.get("documents_error") or memoria.get("failed_reason")
-        if fallo:
-            self.aviso.fallar(str(fallo))
-
-    def _pintar_agregado(self, datos: Any) -> None:
-        """Lo de TODAS las memorias: las tres primeras tarjetas.
-
-        Se suman todas porque es lo que se busca al mirar «en general». La
-        cuarta no puede sumarse y por eso va aparte: contar los documentos
-        indexados de una memoria dormida obligaría a abrirla.
-        """
-        if not isinstance(datos, dict):
-            return
-        total = datos.get("total") or {}
-        cuantas = int(total.get("nemos") or 0)
-
-        self.cifras["archivos"].poner(
-            formato.numero(total.get("total_files")),
-            f"En {cuantas} memoria" + ("" if cuantas == 1 else "s"),
-        )
-        self.cifras["almacenado"].poner(
-            formato.tamano(total.get("total_bytes")), "Bytes reales en disco"
-        )
-
-        categorias = total.get("categories") or []
-        en_uso = sum(1 for c in categorias if (c.get("files") or 0) > 0)
-        self.cifras["categorias"].poner(
-            f"{en_uso} / {len(categorias)}", "En uso sobre el catálogo"
-        )
-
-        # El reparto del disco, las memorias y el catálogo: los tres miran a
-        # todas las memorias a la vez, y por eso salen del mismo agregado.
-        octetos = total.get("total_bytes")
+        categorias = almacen.get("categories") or []
         self.pista_almacenado.setText(formato.tamano(octetos))
         self.medidor.poner(categorias, octetos)
         self.leyenda.poner(categorias, octetos)
 
-        self.pista_categorias.setText(f"{en_uso} de {len(categorias)} en uso")
+        self.pista_categorias.setText(f"{en_uso} de {del_catalogo} en uso")
         self.rejilla_categorias.poner(categorias, octetos)
 
-        # La memoria abierta se marca aquí: el motor sabe cuál es, así que no
-        # hace falta que nadie se la diga a esta pantalla.
-        self.tabla_memorias.poner(
-            datos.get("nemos") or [], octetos, self.motor.memoria
+        self.almacenamiento.emit(almacen)
+
+        tipos = almacen.get("types") or []
+        self.pista_tipos.setText(
+            f"{len(tipos)} tipo" + ("" if len(tipos) == 1 else "s")
         )
+        self.lista_tipos.poner(tipos, octetos)
+
+        fallo = memoria.get("documents_error") or memoria.get("failed_reason")
+        if fallo:
+            self.aviso.fallar(str(fallo))
 
     def _pintar_grafo_cifras(self, datos: Any) -> None:
         """El total del grafo, al lado del título.

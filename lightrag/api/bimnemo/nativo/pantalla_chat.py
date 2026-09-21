@@ -15,7 +15,7 @@ camino de respaldo—, que es justo lo que uno quiere saber antes de fiarse.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo import chat_piezas
 from lightrag.api.bimnemo.nativo.piezas import Aviso
+
 
 class Burbuja(QWidget):
     """Un mensaje de la conversación.
@@ -197,9 +198,7 @@ class PantallaChat(QWidget):
             # **La memoria por defecto tiene el identificador vacío**: es el
             # espacio sin nombre de LightRAG. Con la ruta espejo salía
             # `/nemo//query`, que no existe. La suya es la ruta normal.
-            return (
-                "/bimnemo/memory/search" if solo_contexto else "/query"
-            )
+            return "/bimnemo/memory/search" if solo_contexto else "/query"
 
         nombre = quote(nemo, safe="")
         return (

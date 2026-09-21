@@ -28,11 +28,30 @@ from PySide6.QtWidgets import (
 )
 
 from lightrag.api.bimnemo.nativo.motor import Motor
-from lightrag.api.bimnemo.nativo.piezas import Aviso, Pantalla, Tarjeta
+from lightrag.api.bimnemo.nativo.piezas import (
+    Aviso,
+    Pantalla,
+    RejillaTarjetas,
+    Tarjeta,
+)
 from lightrag.api.bimnemo.nativo.reinicio import Reinicio, conectar_barra
 
 #: Las tres secciones configurables, con el nombre que se le enseña a quien
 #: no sabe qué es un «embedding».
+#: Los idiomas que se ofrecen, los mismos que `configuracion-idioma.js`. El
+#: valor va literal al prompt del motor —por eso en inglés—, y el rótulo es
+#: lo que se lee. El campo admite cualquiera que el modelo entienda, pero una
+#: lista corta evita la errata que estropea una indexación entera.
+IDIOMAS = (
+    ("Spanish", "Español"),
+    ("English", "Inglés"),
+    ("Portuguese", "Portugués"),
+    ("French", "Francés"),
+    ("German", "Alemán"),
+    ("Italian", "Italiano"),
+    ("Chinese", "Chino"),
+)
+
 SECCIONES = (
     (
         "llm",
@@ -218,23 +237,27 @@ class PantallaConfiguracion(Pantalla):
 
         self.secciones: dict[str, Seccion] = {}
         for clave, titulo, explicacion in SECCIONES:
-            seccion = Seccion(clave, titulo, explicacion)
-            self.secciones[clave] = seccion
-            self.anadir(seccion)
+            self.secciones[clave] = Seccion(clave, titulo, explicacion)
 
-        self.anadir(self._idioma())
+        # De dos en dos, como en la web. La de acciones sí va entera, debajo:
+        # afecta a todas.
+        self.rejilla = RejillaTarjetas([*self.secciones.values(), self._idioma()])
+        self.anadir(self.rejilla)
+
         self.anadir(self._acciones())
         self.cerrar_con_espacio()
 
         self.refrescar()
 
     def _idioma(self) -> QWidget:
-        tarjeta = Tarjeta("Idioma")
-        texto = QLabel(
-            "En qué idioma extrae los conceptos y responde. Cambiarlo **no** "
-            "reescribe lo ya indexado: lo guardado conserva el idioma con el "
-            "que se extrajo."
-        )
+        """Idioma de la memoria: un selector, como en la web.
+
+        Era un campo de texto libre, y ahí está el peligro: el valor va
+        literal al prompt del motor, y una errata —«Spansih»— estropea una
+        indexación entera sin avisar. Con la lista no se puede escribir mal.
+        """
+        tarjeta = Tarjeta("Idioma de la memoria")
+        texto = QLabel("En qué idioma se escriben las entidades y las respuestas.")
         texto.setObjectName("descripcion")
         texto.setWordWrap(True)
         tarjeta.anadir(texto)
@@ -249,9 +272,25 @@ class PantallaConfiguracion(Pantalla):
         etiqueta.setMinimumWidth(130)
         caja.addWidget(etiqueta)
 
-        self.idioma = QLineEdit()
+        self.idioma = QComboBox()
+        for valor, rotulo in IDIOMAS:
+            self.idioma.addItem(rotulo, valor)
         caja.addWidget(self.idioma, 1)
         tarjeta.anadir(fila)
+
+        ayuda = QLabel("Se guarda como SUMMARY_LANGUAGE.")
+        ayuda.setObjectName("pista")
+        tarjeta.anadir(ayuda)
+
+        # El aviso, visible y no escondido en la descripción: es el único
+        # ajuste de esta pantalla que no se arregla sin reindexar.
+        aviso = Aviso()
+        aviso.informar(
+            "Cambiarlo no reescribe lo ya indexado: las entidades guardadas "
+            "conservan el idioma con el que se extrajeron. Para unificarlo hay "
+            "que vaciar la memoria y volver a indexar."
+        )
+        tarjeta.anadir(aviso)
         return tarjeta
 
     def _acciones(self) -> QWidget:
@@ -307,13 +346,29 @@ class PantallaConfiguracion(Pantalla):
             return
         for clave, seccion in self.secciones.items():
             seccion.poner_valores(datos.get(clave) or {})
-        self.idioma.setText(datos.get("language") or "")
+        self._poner_idioma(str(datos.get("language") or ""))
 
         if datos.get("restart_required"):
             self.estado.informar(
                 "Hay configuración guardada que el motor todavía no usa. "
                 "Reinicia para aplicarla."
             )
+
+    def _poner_idioma(self, actual: str) -> None:
+        """Marca el idioma guardado, aunque no esté en la lista.
+
+        Si alguien lo cambió a mano en el `.env` —«Catalan», por ejemplo—, se
+        añade tal cual y se deja marcado. Elegir el primero de la lista en su
+        lugar cambiaría el idioma en el siguiente «Guardar» sin que nadie lo
+        hubiera pedido.
+        """
+        if not actual:
+            return
+        indice = self.idioma.findData(actual)
+        if indice < 0:
+            self.idioma.insertItem(0, actual, actual)
+            indice = 0
+        self.idioma.setCurrentIndex(indice)
 
     def _fallo(self, motivo: str) -> None:
         self.aviso.fallar(motivo)
@@ -322,10 +377,9 @@ class PantallaConfiguracion(Pantalla):
 
     def _guardar(self) -> None:
         cuerpo: dict[str, Any] = {
-            clave: seccion.a_peticion()
-            for clave, seccion in self.secciones.items()
+            clave: seccion.a_peticion() for clave, seccion in self.secciones.items()
         }
-        cuerpo["language"] = self.idioma.text().strip()
+        cuerpo["language"] = str(self.idioma.currentData() or "")
 
         self.boton_guardar.setEnabled(False)
         self.estado.informar("Guardando…")
@@ -333,9 +387,7 @@ class PantallaConfiguracion(Pantalla):
 
     def _guardado(self, _datos: Any) -> None:
         self.boton_guardar.setEnabled(True)
-        self.estado.acertar(
-            "Guardado. Reinicia el motor para que empiece a usarlo."
-        )
+        self.estado.acertar("Guardado. Reinicia el motor para que empiece a usarlo.")
         self.refrescar()
 
     def _no_guardo(self, motivo: str) -> None:

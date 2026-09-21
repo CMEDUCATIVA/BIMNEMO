@@ -7,11 +7,33 @@ panel. Por eso una extensión puede estar aquí y no ser todavía ingerible por 
 motor: el panel lo muestra, y ``supported_extensions`` (vivo, del registro de
 parsers) es quien dice si se puede subir.
 
-Las categorías son ocho y fijas. El panel enseña «N / 8», así que añadir una
-categoría cambia ese denominador: es un cambio de contrato con la vista, no un
-detalle. El color de cada categoría sale de la paleta del Lookbook y se declara
-aquí para que exista una sola fuente: el nombre del token viaja a la ventana y
-``nativo/tema.py`` lo resuelve.
+## La regla: una categoría existe si BIMNEMO, tal y como se instala, puede leer alguno de sus formatos
+
+Comprobable, no opinable: los motores que funcionan **sin nada más**
+—``legacy`` y ``native``— y lo que aceptan. Los otros dos, ``mineru`` y
+``docling``, piden un servicio HTTP aparte (``MINERU_LOCAL_ENDPOINT``,
+``DOCLING_ENDPOINT``) que no viaja en el paquete: contar con ellos sería
+fiar una tarjeta del panel a algo que el usuario no tiene.
+
+Por eso no hay «Modelo BIM» ni «Plano CAD» —**ningún motor acepta IFC, RVT,
+DWG ni DXF, en ninguna configuración**— y tampoco «Imagen»: leerlas es
+justamente lo que hacen MinerU y Docling, y sin su servicio no entra ninguna.
+La subida las rechaza igual que a un DWG.
+
+Una tarjeta para algo que el programa no admite promete lo que no puede
+cumplir, y era una contradicción con la zona de arrastre, que a dos dedos de
+ahí enumera lo que sí entra. Un fichero de esos, copiado a mano en la
+carpeta, se cuenta en «Otros», que es la verdad: está guardado y no se puede
+indexar.
+
+Si algún día el paquete lleva MinerU o Docling dentro, «Imagen» vuelve: es
+añadir la categoría y sus extensiones aquí, y la prueba de `tests/bimnemo/
+test_catalog.py` cambia con ella.
+
+El panel enseña «N / <cuántas categorías>», tomando el denominador del propio
+catálogo; añadir o quitar una no rompe la vista. El color de cada una sale de
+la paleta del Lookbook y se declara aquí para que exista una sola fuente: el
+nombre del token viaja a la ventana y ``nativo/tema.py`` lo resuelve.
 """
 
 from __future__ import annotations
@@ -33,9 +55,6 @@ CATEGORIES: tuple[Category, ...] = (
     Category("document", "Documento", "file-text", "sky"),
     Category("spreadsheet", "Hoja de cálculo", "table", "teal"),
     Category("presentation", "Presentación", "presentation", "rose"),
-    Category("photo", "Foto", "image", "emerald"),
-    Category("bim_model", "Modelo BIM", "box", "violet"),
-    Category("cad_drawing", "Plano CAD", "ruler", "orange"),
     Category("data", "Datos", "database", "amber"),
     Category("text", "Texto y código", "code", "slate"),
 )
@@ -75,6 +94,8 @@ def _register(category_key: str, *extensions: str) -> None:
 
 _register(
     "document",
+    # Lee el motor: pdf, docx, odt, rtf y epub. Los demás son de la misma
+    # familia y se clasifican igual si aparecen en la carpeta.
     "pdf",
     "doc",
     "docx",
@@ -86,8 +107,8 @@ _register(
 )
 _register(
     "spreadsheet",
-    "xls",
     "xlsx",
+    "xls",
     "xlsm",
     "xltx",
     "ods",
@@ -97,60 +118,11 @@ _register(
 )
 _register(
     "presentation",
-    "ppt",
     "pptx",
+    "ppt",
     "potx",
     "odp",
     "key",
-)
-_register(
-    "photo",
-    "jpg",
-    "jpeg",
-    "png",
-    "gif",
-    "bmp",
-    "tif",
-    "tiff",
-    "webp",
-    "heic",
-    "svg",
-)
-_register(
-    # Formatos de modelo: IFC y los nativos de Revit, Navisworks, ArchiCAD,
-    # Tekla, SketchUp, Rhino y los de intercambio de malla.
-    "bim_model",
-    "ifc",
-    "ifczip",
-    "rvt",
-    "rfa",
-    "rte",
-    "nwc",
-    "nwd",
-    "nwf",
-    "pln",
-    "ifcxml",
-    "skp",
-    "3dm",
-    "dgn",
-    "tekla",
-    "db1",
-    "gltf",
-    "glb",
-    "obj",
-    "fbx",
-    "stl",
-    "3ds",
-    "dae",
-)
-_register(
-    "cad_drawing",
-    "dwg",
-    "dxf",
-    "dwf",
-    "dwfx",
-    "dst",
-    "dwt",
 )
 _register(
     "data",
@@ -163,19 +135,27 @@ _register(
     "db",
     "sqlite",
     "parquet",
-    "bcf",
-    "bcfzip",
-    "gbxml",
-    "cobie",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "properties",
 )
 _register(
     "text",
+    # Texto plano y marcado.
     "txt",
     "md",
+    "mdx",
     "markdown",
     "rst",
     "log",
     "tex",
+    "textpack",
+    "html",
+    "htm",
+    "xhtml",
+    # Y código, que el motor lee como texto.
     "py",
     "js",
     "ts",
@@ -185,32 +165,19 @@ _register(
     "c",
     "h",
     "cpp",
+    "hpp",
     "cs",
     "go",
     "rb",
     "rs",
     "php",
     "sh",
-    "ps1",
-    "html",
-    "htm",
-    "css",
-    "ini",
-    "toml",
-    "cfg",
-    # Estas nueve se podían SUBIR pero no tenían categoría, así que caían en
-    # «Otros» — que además no cuenta para el «N / 8» del panel. Un formato que
-    # la zona de arrastre anuncia y el panel luego no sabe clasificar es una
-    # contradicción dentro de la misma pantalla.
     "bat",
-    "conf",
-    "hpp",
-    "less",
-    "mdx",
-    "properties",
-    "scss",
+    "ps1",
     "swift",
-    "textpack",
+    "css",
+    "scss",
+    "less",
 )
 
 

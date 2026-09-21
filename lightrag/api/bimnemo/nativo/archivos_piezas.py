@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from lightrag.api.bimnemo.nativo import iconos, tema
-from lightrag.api.bimnemo.nativo.piezas import Fluida, insignia  # noqa: F401
+from lightrag.api.bimnemo.nativo.piezas import Fluida
 
 #: La categoría de descarte, la misma que `catalog.UNKNOWN`. No viene en el
 #: catálogo —no ocupa una de las ocho ranuras— pero sí aparece en las filas.
@@ -88,7 +88,7 @@ class ZonaSoltar(QFrame):
         columna.setSpacing(6)
 
         marca = QLabel()
-        marca.setPixmap(iconos.pixmap("subir", 28, tema.ACTUAL.texto_3))
+        iconos.poner(marca, "subir", 28, "texto_3")
         marca.setAlignment(Qt.AlignCenter)
         columna.addWidget(marca)
 
@@ -244,9 +244,21 @@ class Filtros(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
+    def elegir(self, clave: str) -> None:
+        """Fija la categoría desde fuera: la pulsa el panel.
+
+        Hace lo mismo que pulsar su chip, incluido dejarlo marcado — si no,
+        la tabla saldría filtrada y ningún chip lo diría.
+        """
+        self._activa = clave
+        for boton in self._grupo.buttons():
+            boton.setChecked(str(boton.property("clave") or "") == clave)
+        self.elegida.emit(clave)
+
     def _chip(self, rotulo: str, clave: str, cuantos: int) -> None:
         boton = QPushButton(f"{rotulo}  {cuantos}")
         boton.setObjectName("chip")
+        boton.setProperty("clave", clave)
         boton.setCheckable(True)
         boton.setChecked(clave == self._activa)
         boton.setCursor(Qt.PointingHandCursor)
@@ -265,5 +277,4 @@ __all__ = [
     "ZonaSoltar",
     "categoria_de",
     "icono_categoria",
-    "insignia",
 ]

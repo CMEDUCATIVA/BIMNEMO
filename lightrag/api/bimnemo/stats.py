@@ -168,9 +168,9 @@ async def scan_storage(
 def summarize_storage(snapshot: StorageSnapshot) -> dict[str, Any]:
     """Totales y reparto por categoría y por tipo, listos para el panel.
 
-    Las ocho categorías del catálogo aparecen SIEMPRE, también con cero
-    ficheros: el panel enseña «N / 8» y necesita las ocho ranuras para pintar
-    las que están vacías. ``other`` solo aparece si de verdad hay algo sin
+    Todas las categorías del catálogo aparecen SIEMPRE, también con cero
+    ficheros: el panel enseña «N / <cuántas hay>» y necesita todas sus
+    ranuras para pintar las que están vacías. ``other`` solo aparece si de verdad hay algo sin
     clasificar, y nunca cuenta como categoría en uso.
     """
     by_category: dict[str, dict[str, Any]] = {

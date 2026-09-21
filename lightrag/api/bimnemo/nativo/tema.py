@@ -722,6 +722,23 @@ def hoja(p: Paleta) -> str:
         text-align: left;
     }}
 
+    /* --- Carril: el resumen del pie ------------------------------------- */
+    #resumen-carril {{
+        background: transparent;
+        border-top: 1px solid {p.borde};
+    }}
+    #rotulo-carril {{
+        color: {p.texto_3};
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.8px;
+    }}
+    #cifra-carril {{
+        color: {p.texto};
+        font-size: 19px;
+        font-weight: 600;
+    }}
+
     /* --- Panel: categorías y tipos -------------------------------------- */
     QPushButton#tarjeta-categoria {{
         background: {p.fondo};

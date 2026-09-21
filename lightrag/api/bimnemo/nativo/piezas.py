@@ -12,6 +12,7 @@ from typing import Optional
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QLayout,
     QHBoxLayout,
     QLabel,
@@ -208,8 +209,8 @@ class Fluida(QLayout):
 
         for pieza in self._piezas:
             medida = pieza.sizeHint()
-            siguiente = ancho_fila + medida.width() + (
-                self._separacion if actual else 0
+            siguiente = (
+                ancho_fila + medida.width() + (self._separacion if actual else 0)
             )
             if actual and siguiente > rect.width():
                 filas.append((actual, ancho_fila, alto_fila))
@@ -236,6 +237,82 @@ class Fluida(QLayout):
             y += alto_fila + self._salto
 
         return max(0, y - self._salto - rect.y())
+
+
+#: Por debajo de este ancho de la rejilla, las tarjetas van de una en una: dos
+#: de cuatrocientos píxeles ya no dejan leer ni el nombre de un proveedor.
+ANCHO_DOS_COLUMNAS = 900
+
+
+class RejillaTarjetas(QWidget):
+    """Tarjetas de dos en dos, y de una en una cuando no caben.
+
+    Es lo que hacen Configuración IA y Motor, que en una sola columna dejaban
+    cada dato en una línea de mil píxeles con el valor perdido al otro
+    extremo.
+
+    Dos tarjetas de la misma fila miden lo que la más alta, y la baja
+    **se rellena por abajo**: sin eso repartía ese alto entre sus líneas —el
+    título por un lado, el primer dato por otro y un hueco entre medias—.
+    Por eso las tarjetas tienen que llegar ya completas; lo que se les añada
+    después quedaría debajo del relleno.
+
+    Se mide por su propio ancho, no por el de la pantalla: una página del
+    apilado que no está a la vista no recibe los cambios de tamaño hasta que
+    se enseña, y la rejilla sí los recibe entonces.
+    """
+
+    def __init__(
+        self,
+        tarjetas: list[QWidget],
+        ancho_dos_columnas: int = ANCHO_DOS_COLUMNAS,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("fila")
+        self.tarjetas = list(tarjetas)
+        self._umbral = ancho_dos_columnas
+        self._columnas = 0
+
+        self.rejilla = QGridLayout(self)
+        self.rejilla.setContentsMargins(0, 0, 0, 0)
+        self.rejilla.setHorizontalSpacing(16)
+        self.rejilla.setVerticalSpacing(16)
+
+        for tarjeta in self.tarjetas:
+            # Una sección de Configuración envuelve su tarjeta; una tarjeta
+            # suelta es ella misma.
+            interior = getattr(tarjeta, "tarjeta", tarjeta)
+            interior.columna.addStretch(1)
+
+        self._colocar(2)
+
+    @property
+    def columnas(self) -> int:
+        return self._columnas
+
+    def posiciones(self) -> list[tuple[int, int]]:
+        """Fila y columna de cada tarjeta, en el orden en que llegaron."""
+        sitio = []
+        for tarjeta in self.tarjetas:
+            fila, columna, _alto, _ancho = self.rejilla.getItemPosition(
+                self.rejilla.indexOf(tarjeta)
+            )
+            sitio.append((fila, columna))
+        return sitio
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre de Qt)
+        super().resizeEvent(evento)
+        self._colocar(2 if self.width() >= self._umbral else 1)
+
+    def _colocar(self, columnas: int) -> None:
+        if columnas == self._columnas:
+            return
+        self._columnas = columnas
+        for puesto, tarjeta in enumerate(self.tarjetas):
+            self.rejilla.addWidget(tarjeta, puesto // columnas, puesto % columnas)
+        for columna in range(2):
+            self.rejilla.setColumnStretch(columna, 1 if columna < columnas else 0)
 
 
 class Pantalla(QWidget):

@@ -37,7 +37,7 @@ from lightrag.api.bimnemo.nativo.motor import Motor
 MAXIMO = 60
 
 
-def _ajustes() -> QSettings:
+def ajustes() -> QSettings:
     """Donde la ventana recuerda sus preferencias entre sesiones.
 
     Es el equivalente del `localStorage` de la web. En Windows va al
@@ -103,7 +103,7 @@ class Memorias(QObject):
             self._por_defecto = str(datos.get("default") or "")
 
             existe = {str(n.get("id", "")) for n in self._nemos}
-            guardada = _ajustes().value("memoria", None)
+            guardada = ajustes().value("memoria", None)
 
             # El orden importa: lo recordado solo vale si sigue existiendo.
             if guardada is not None and str(guardada) in existe:
@@ -130,7 +130,7 @@ class Memorias(QObject):
             return
         self._actual = nemo_id
         self.motor.usar_memoria(nemo_id)
-        _ajustes().setValue("memoria", nemo_id)
+        ajustes().setValue("memoria", nemo_id)
         self.listado.emit()
         self.cambiada.emit(nemo_id)
 
@@ -188,7 +188,7 @@ class _Dialogo(QDialog):
         caja.setSpacing(8)
 
         marca = QLabel()
-        marca.setPixmap(iconos.pixmap(icono, 16, tema.ACTUAL.texto_2))
+        iconos.poner(marca, icono, 16)
         caja.addWidget(marca)
 
         rotulo = QLabel(titulo)
@@ -208,7 +208,9 @@ class _Dialogo(QDialog):
         self.columna.addWidget(etiqueta)
         return etiqueta
 
-    def botonera(self, cancelar: str, aceptar: str, peligro: bool = False) -> QPushButton:
+    def botonera(
+        self, cancelar: str, aceptar: str, peligro: bool = False
+    ) -> QPushButton:
         self.columna.addWidget(self.error)
 
         fila = QWidget()
@@ -248,7 +250,7 @@ class DialogoCrear(_Dialogo):
             "Cada memoria indexa y relaciona sus documentos por separado. Lo "
             "que guardes aquí no se mezclará con el resto."
         )
-        self.parrafo("Nombre", "rotulo-campo")
+        self.parrafo("Nombre", "rotulo-dialogo")
 
         self.campo = QLineEdit()
         self.campo.setMaxLength(MAXIMO)
@@ -268,7 +270,9 @@ class DialogoCrear(_Dialogo):
         self.aceptar.setEnabled(False)
 
         def hecho(datos: Any) -> None:
-            self.creada = str((datos or {}).get("id", "")) if isinstance(datos, dict) else ""
+            self.creada = (
+                str((datos or {}).get("id", "")) if isinstance(datos, dict) else ""
+            )
             self.accept()
 
         def no_pudo(motivo: str) -> None:
@@ -300,7 +304,7 @@ class DialogoRenombrar(_Dialogo):
         self.ficha = ficha
         self.era_por_defecto = es_por_defecto
 
-        self.parrafo("Nombre", "rotulo-campo")
+        self.parrafo("Nombre", "rotulo-dialogo")
         self.campo = QLineEdit(str(ficha.get("name") or ""))
         self.campo.setMaxLength(MAXIMO)
         self.campo.textChanged.connect(self._revisar)
@@ -333,7 +337,9 @@ class DialogoRenombrar(_Dialogo):
         self.fallar("")
         quedan = MAXIMO - len(self.campo.text())
         self.cuenta.setText(
-            f"Quedan {quedan} caracteres" if quedan <= 10 else f"Hasta {MAXIMO} caracteres"
+            f"Quedan {quedan} caracteres"
+            if quedan <= 10
+            else f"Hasta {MAXIMO} caracteres"
         )
         # Nada que guardar si no cambió ni el nombre ni la casilla: un botón
         # activo que no va a hacer nada es una promesa que no se cumple.
@@ -380,7 +386,9 @@ class DialogoRenombrar(_Dialogo):
 
     def _solo_el_nombre(self, motivo: str) -> None:
         self.aceptar.setText("Guardar")
-        self.fallar(f"El nombre se guardó, pero no se pudo marcar por defecto: {motivo}")
+        self.fallar(
+            f"El nombre se guardó, pero no se pudo marcar por defecto: {motivo}"
+        )
 
 
 class DialogoBorrar(_Dialogo):
@@ -392,7 +400,9 @@ class DialogoBorrar(_Dialogo):
         self.protegida = bool(ficha.get("protected"))
         nombre = str(ficha.get("name") or "")
         super().__init__(
-            "Esta memoria no se puede borrar" if self.protegida else f"Borrar «{nombre}»",
+            "Esta memoria no se puede borrar"
+            if self.protegida
+            else f"Borrar «{nombre}»",
             "borrar",
             padre,
         )
@@ -417,7 +427,7 @@ class DialogoBorrar(_Dialogo):
             "deshacer y no pasa por la papelera."
         )
         aviso.setObjectName("error")
-        self.parrafo("Escribe el nombre exacto para confirmarlo", "rotulo-campo")
+        self.parrafo("Escribe el nombre exacto para confirmarlo", "rotulo-dialogo")
 
         self.campo = QLineEdit()
         self.campo.setMaxLength(MAXIMO)
@@ -425,9 +435,9 @@ class DialogoBorrar(_Dialogo):
         self.campo.returnPressed.connect(self._borrar)
         self.columna.addWidget(self.campo)
 
-        self.botonera("Cancelar", "Borrar definitivamente", peligro=True).clicked.connect(
-            self._borrar
-        )
+        self.botonera(
+            "Cancelar", "Borrar definitivamente", peligro=True
+        ).clicked.connect(self._borrar)
         self.aceptar.setEnabled(False)
         self.campo.setFocus()
 
@@ -469,4 +479,10 @@ class DialogoBorrar(_Dialogo):
         )
 
 
-__all__ = ["DialogoBorrar", "DialogoCrear", "DialogoRenombrar", "Memorias"]
+__all__ = [
+    "DialogoBorrar",
+    "DialogoCrear",
+    "DialogoRenombrar",
+    "Memorias",
+    "ajustes",
+]

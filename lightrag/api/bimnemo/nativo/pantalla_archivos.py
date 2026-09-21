@@ -111,6 +111,9 @@ class PantallaArchivos(Pantalla):
         self._parado_desde: Optional[float] = None
         self._sello: Optional[str] = None
         self._ultima_cuenta: Optional[int] = None
+        #: Si el motor ya ha contestado alguna vez. Hasta entonces no hay
+        #: «cero archivos»: hay «todavía no se sabe», y son cosas distintas.
+        self._recibido = False
         #: Las barras vivas, por nombre de fichero, para poder moverlas sin
         #: repintar la tabla entera.
         self._barras: dict[str, tuple[QProgressBar, QLabel]] = {}
@@ -132,7 +135,6 @@ class PantallaArchivos(Pantalla):
         self._vigilante.start()
 
         self._cargar_catalogo()
-        self._cargar_memoria()
         self.refrescar()
         self._mirar()
 
@@ -154,7 +156,7 @@ class PantallaArchivos(Pantalla):
         caja.addStretch(1)
 
         self.boton_reindexar = QPushButton("Reindexar pendientes")
-        self.boton_reindexar.setIcon(iconos.icono("recargar", 14, tema.ACTUAL.texto_2))
+        iconos.poner(self.boton_reindexar, "recargar", 14)
         self.boton_reindexar.setCursor(Qt.PointingHandCursor)
         self.boton_reindexar.setToolTip(
             "Busca en la carpeta de entrada lo que todavía no está en la "
@@ -165,7 +167,7 @@ class PantallaArchivos(Pantalla):
 
         subir = QPushButton("Subir archivos")
         subir.setObjectName("principal")
-        subir.setIcon(iconos.icono("subir", 15, tema.ACTUAL.sobre_azul))
+        iconos.poner(subir, "subir", 15, "sobre_azul")
         subir.setCursor(Qt.PointingHandCursor)
         subir.clicked.connect(self._elegir)
         caja.addWidget(subir)
@@ -285,20 +287,27 @@ class PantallaArchivos(Pantalla):
 
         self.motor.get("/bimnemo/catalog", llego, no_pudo)
 
-    def _cargar_memoria(self) -> None:
-        """El nombre de la memoria activa, para la pista de la cabecera."""
+    def retematizar(self) -> None:
+        """Las insignias de la tabla llevan su color escrito en el widget.
 
-        def llego(datos: Any) -> None:
-            if not isinstance(datos, dict):
-                return
-            activa = str(datos.get("default") or "")
-            for nemo in datos.get("nemos") or []:
-                if str(nemo.get("id") or "") == activa:
-                    self._memoria = str(nemo.get("name") or "")
-                    break
-            self._repintar()
+        Los iconos los repasa la ventana; esto es para lo que se pinta con
+        un estilo propio por fila, que no lo alcanza ninguna hoja.
+        """
+        self._repintar()
 
-        self.motor.get("/bimnemo/nemos", llego, None)
+    def filtrar(self, categoria: str) -> None:
+        """Deja la tabla en una categoría. La pulsa alguien en el panel."""
+        self.filtros.elegir(categoria)
+
+    def poner_memoria(self, nombre: str) -> None:
+        """El nombre de la memoria abierta, para la pista de la cabecera.
+
+        Lo inyecta la ventana en vez de pedirlo aquí: quién está abierta lo
+        sabe la barra superior, y dos sitios preguntándolo se contradicen en
+        cuanto uno se entera del cambio antes que el otro.
+        """
+        self._memoria = nombre
+        self._repintar()
 
     def refrescar(self) -> None:
         self.motor.get("/bimnemo/files", self._recibir, self._fallo)
@@ -307,6 +316,7 @@ class PantallaArchivos(Pantalla):
         if not isinstance(datos, dict):
             return
         self.aviso.callar()
+        self._recibido = True
         self._filas = list(datos.get("files") or [])
 
         # Un borrado termina con la fila desapareciendo, así que la marca
@@ -354,7 +364,7 @@ class PantallaArchivos(Pantalla):
         pista = f"{formato.numero(len(visibles))} de {formato.numero(total)}"
         self.pista.setText(f"{self._memoria} · {pista}" if self._memoria else pista)
 
-        if total != self._ultima_cuenta:
+        if self._recibido and total != self._ultima_cuenta:
             self._ultima_cuenta = total
             self.cuenta.emit(total)
 
@@ -613,7 +623,7 @@ class PantallaArchivos(Pantalla):
         """
         boton = QPushButton()
         boton.setObjectName("icono")
-        boton.setIcon(iconos.icono(icono, 14, tema.ACTUAL.texto_2))
+        iconos.poner(boton, icono, 14)
         boton.setToolTip(pista)
         boton.setCursor(Qt.PointingHandCursor)
         boton.setFixedSize(30, 26)

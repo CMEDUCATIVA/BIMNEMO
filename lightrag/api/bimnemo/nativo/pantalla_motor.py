@@ -15,12 +15,16 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressBar,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from lightrag.api.bimnemo.nativo.motor import Motor
-from lightrag.api.bimnemo.nativo.piezas import Aviso, Pantalla, Tarjeta
+from lightrag.api.bimnemo.nativo.piezas import (
+    Aviso,
+    Pantalla,
+    RejillaTarjetas,
+    Tarjeta,
+)
 from lightrag.api.bimnemo.nativo.reinicio import Reinicio, conectar_barra
 
 #: Qué se enseña de cada bloque que devuelve `/bimnemo/engine`, y con qué
@@ -123,13 +127,19 @@ class PantallaMotor(Pantalla):
         self.aviso = Aviso()
         self.anadir(self.aviso)
 
+        tarjetas = []
         for titulo, bloque, campos in BLOQUES:
             tarjeta = Tarjeta(titulo)
             for clave, nombre in campos:
                 self._valores[f"{bloque}.{clave}"] = tarjeta.dato(nombre, "…")
-            self.anadir(tarjeta)
+            tarjetas.append(tarjeta)
+        tarjetas.append(self._carpetas())
 
-        self.anadir(self._carpetas())
+        # De dos en dos: a todo lo ancho, cada dato quedaba a mil píxeles de
+        # su nombre. El reinicio sí va entero, debajo: es del motor entero,
+        # no de una de las tarjetas.
+        self.rejilla = RejillaTarjetas(tarjetas)
+        self.anadir(self.rejilla)
         self.anadir(self._zona_de_reinicio())
         self.cerrar_con_espacio()
 
