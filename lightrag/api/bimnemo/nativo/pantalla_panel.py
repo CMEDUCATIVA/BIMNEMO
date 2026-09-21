@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 from lightrag.api.bimnemo.nativo import iconos
 from lightrag.api.bimnemo.nativo.disposicion import DISPOSICIONES, POR_DEFECTO
 from lightrag.api.bimnemo.nativo import formato, panel_piezas
+from lightrag.api.bimnemo.nativo.frescura import Frescura
 from lightrag.api.bimnemo.nativo.grafo import Grafo
 from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo.piezas import Aviso, Fluida, Tarjeta
@@ -387,6 +388,10 @@ class PantallaPanel(QWidget):
         self._sondeo_pulso.setInterval(SONDEO_PULSO_MS)
         self._sondeo_pulso.timeout.connect(self._mirar_pulso)
         self._sondeo_pulso.start()
+
+        # Lo subido en Archivos aparece aquí sin tener que pulsar «Releer».
+        self.frescura = Frescura(self.motor, self)
+        self.frescura.cambiaron.connect(self._datos_nuevos)
 
         self.refrescar()
 
@@ -827,9 +832,25 @@ class PantallaPanel(QWidget):
         self.grafo.update()
 
     def refrescar(self) -> None:
+        self.frescura.olvidar()
+        self._releer_cifras()
+        self._cargar_grafo()
+
+    def _releer_cifras(self) -> None:
         self.motor.get("/bimnemo/stats", self._pintar_cifras, self._fallo)
         self.motor.get("/bimnemo/stats/graph", self._pintar_grafo_cifras, None)
-        self._cargar_grafo()
+
+    def _datos_nuevos(self, con_grafo: bool) -> None:
+        """La memoria ha cambiado desde que se pintó el panel.
+
+        Con el motor indexando y la pantalla a la vista, solo las cifras: el
+        grafo se redibujaría con cada documento y desharía lo que se estuviera
+        mirando. Al volver a la pantalla, o cuando el motor termina, todo.
+        """
+        if con_grafo:
+            self.refrescar()
+        else:
+            self._releer_cifras()
 
     def _pintar_cifras(self, datos: Any) -> None:
         """Todo el panel, con lo que hay en la memoria abierta.
