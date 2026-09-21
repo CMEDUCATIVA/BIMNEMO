@@ -241,7 +241,22 @@ def _atomic_write(path: Path, content: str) -> None:
         raise
 
 
+def clave_puesta(valor: str) -> bool:
+    """¿Hay una clave de verdad, o el hueco de ejemplo?
+
+    El ``.env`` de fábrica sale de ``env.example`` y trae
+    ``LLM_BINDING_API_KEY=your_api_key``. Contarlo como clave guardada hacía
+    que una instalación recién estrenada enseñara «(guardada)» en
+    Configuración, y que se pudiera seguir adelante sin haber puesto ninguna:
+    el fallo aparecía después, al indexar el primer documento, y lejos de
+    donde se arregla.
+    """
+    limpio = (valor or "").strip().lower()
+    return bool(limpio) and not limpio.startswith(("your_", "your-"))
+
+
 __all__ = [
+    "clave_puesta",
     "APPENDED_HEADER",
     "SECRET_KEYS",
     "UNCHANGED",

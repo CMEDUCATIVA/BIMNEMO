@@ -289,6 +289,13 @@ def hoja(p: Paleta) -> str:
         border: 1px solid {p.borde};
         border-radius: 12px;
     }}
+    /* El cuadro de la primera vez, encima del velo. Algo más de sombra
+       visual que una tarjeta —borde más marcado— porque flota sobre todo. */
+    #bienvenida {{
+        background: {p.fondo};
+        border: 1px solid {p.borde_medio};
+        border-radius: 16px;
+    }}
     #subtitulo {{
         color: {p.texto};
         font-size: 15px;

@@ -31,7 +31,12 @@ from lightrag.api.bimnemo.runtime import (
     CONFIGURABLE_ENV_KEYS,
     RESTART_EXIT_CODE as _RESTART_EXIT_CODE,
 )
-from lightrag.api.bimnemo.envfile import UNCHANGED, read_env, write_env
+from lightrag.api.bimnemo.envfile import (
+    UNCHANGED,
+    clave_puesta,
+    read_env,
+    write_env,
+)
 from lightrag.api.bimnemo.providers import catalog_payload, find, match_provider
 from lightrag.utils import logger
 
@@ -461,7 +466,7 @@ def _section_view(values: dict[str, str], kind: str) -> dict[str, Any]:
         "provider": match_provider(kind, binding, host) if binding else "",
         "host": host,
         "model": values.get(f"{prefix}_MODEL", ""),
-        "api_key_set": bool(values.get(f"{prefix}_BINDING_API_KEY", "")),
+        "api_key_set": clave_puesta(values.get(f"{prefix}_BINDING_API_KEY", "")),
     }
     if kind == "embedding":
         raw_dim = values.get("EMBEDDING_DIM", "")

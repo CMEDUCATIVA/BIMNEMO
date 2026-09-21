@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from lightrag.api.bimnemo.nativo import formato, iconos, tema
 from lightrag.api.bimnemo.nativo.barra import BarraSuperior
+from lightrag.api.bimnemo.nativo.bienvenida import Bienvenida
 from lightrag.api.bimnemo.nativo.memorias import Memorias, ajustes
 from lightrag.api.bimnemo.nativo.panel_piezas import ResumenCarril
 from lightrag.api.bimnemo.nativo.motor import Motor
@@ -134,6 +135,11 @@ class Ventana(QMainWindow):
         self.memorias.listado.connect(self._repartir_memoria)
         self.barra.retematizar()
         self.memorias.cargar()
+
+        # La primera vez: nombre de la memoria y modelo, antes que nada.
+        self.bienvenida = Bienvenida(self, motor, self.memorias)
+        self.bienvenida.terminada.connect(self.refrescar_todo)
+        self.bienvenida.comprobar()
 
     # -- lo que vale para toda la ventana -----------------------------------
 

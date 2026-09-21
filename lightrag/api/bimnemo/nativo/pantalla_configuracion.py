@@ -207,6 +207,14 @@ class Seccion(QWidget):
 
     # -- guardado -----------------------------------------------------------
 
+    def falta_clave(self) -> bool:
+        """¿Pide clave este proveedor y no hay ninguna, ni escrita ni guardada?"""
+        return (
+            self.api_key.isEnabled()
+            and not self.api_key.text().strip()
+            and not self._tenia_clave
+        )
+
     def a_peticion(self) -> dict[str, Any]:
         elegido = self._elegido() or {}
         datos: dict[str, Any] = {
