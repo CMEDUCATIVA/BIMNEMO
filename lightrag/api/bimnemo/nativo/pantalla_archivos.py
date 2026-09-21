@@ -427,7 +427,9 @@ class PantallaArchivos(Pantalla):
         )
 
         estado = self._estado_de(archivo, nombre)
-        self.tabla.setCellWidget(indice, ESTADO, self._celda_estado(nombre, estado))
+        self.tabla.setCellWidget(
+            indice, ESTADO, self._celda_estado(nombre, estado, self._pista_de(archivo, estado))
+        )
 
         trozos = archivo.get("chunks_count")
         self.tabla.setItem(
@@ -476,12 +478,26 @@ class PantallaArchivos(Pantalla):
             return "subiendo"
         if nombre in self._borrandose:
             return "deleting"
+        if archivo.get("duplicate_of") is not None:
+            return "duplicado"
         return str(archivo.get("status") or "")
 
-    def _celda_estado(self, nombre: str, estado: str) -> QWidget:
+    @staticmethod
+    def _pista_de(archivo: dict[str, Any], estado: str) -> str:
+        """Por qué un documento falló, o de qué es copia, al pasar el ratón.
+
+        El motivo ya viajaba en cada fila y no se enseñaba en ningún sitio:
+        la tabla decía «Fallido» y había que ir a buscar el porqué al Panel.
+        """
+        if estado in ("failed", "duplicado"):
+            return str(archivo.get("error_msg") or "")
+        return ""
+
+    def _celda_estado(self, nombre: str, estado: str, pista: str = "") -> QWidget:
         """La insignia del estado y, si hay trabajo, su barra debajo."""
         caja_exterior = QWidget()
         caja_exterior.setObjectName("fila")
+        caja_exterior.setToolTip(pista)
         columna = QVBoxLayout(caja_exterior)
         columna.setContentsMargins(4, 4, 8, 4)
         columna.setSpacing(3)
@@ -606,9 +622,15 @@ class PantallaArchivos(Pantalla):
             caja.addWidget(reintentar)
 
         borrando = estado == "deleting"
-        borrar = self._boton_fila(
-            "borrar", "Borrándose…" if borrando else "Borrar este archivo"
-        )
+        if borrando:
+            pista = "Borrándose…"
+        elif estado == "duplicado":
+            # Reintentar una copia no serviría de nada: se volvería a
+            # rechazar. Lo único útil es quitarla, y se dice qué se pierde.
+            pista = "Borrar esta copia. El original sigue en la memoria."
+        else:
+            pista = "Borrar este archivo"
+        borrar = self._boton_fila("borrar", pista)
         borrar.setEnabled(bool(archivo.get("name")) and not borrando)
         borrar.clicked.connect(lambda: self._confirmar_borrado(archivo))
         caja.addWidget(borrar)

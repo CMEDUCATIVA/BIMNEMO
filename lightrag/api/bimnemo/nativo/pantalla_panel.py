@@ -880,7 +880,11 @@ class PantallaPanel(QWidget):
         self.lista_tipos.poner(tipos, octetos)
 
         fallo = memoria.get("documents_error") or memoria.get("failed_reason")
-        if fallo:
+        if fallo and memoria.get("failed_kind") == "duplicate":
+            # Una copia repetida no es un error: no falta nada. Se dice en el
+            # tono de un aviso, con lo que hay que hacer, no en rojo.
+            self.aviso.informar(str(fallo))
+        elif fallo:
             self.aviso.fallar(str(fallo))
 
     def _pintar_grafo_cifras(self, datos: Any) -> None:

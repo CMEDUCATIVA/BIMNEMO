@@ -20,6 +20,7 @@ recorrer el grafo entero es caro y el panel no debe quedarse colgado de él.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -266,6 +267,7 @@ async def summarize_memory(rag: Any) -> dict[str, Any]:
     total_chunks = 0
     total_text_chars = 0
     failed_reason: Optional[str] = None
+    copia_repetida: Optional[str] = None
 
     for record in documents.values():
         status_value = getattr(record.status, "value", str(record.status))
@@ -277,8 +279,17 @@ async def summarize_memory(rag: Any) -> dict[str, Any]:
         # Antes solo salía «N documentos fallaron», y la causa —una clave
         # rechazada, una cuenta sin crédito, un modelo que no existe— quedaba
         # en el registro del motor, donde nadie la busca.
-        if failed_reason is None and status_value == DocStatus.FAILED.value:
-            failed_reason = _clean_reason(getattr(record, "error_msg", None))
+        if status_value != DocStatus.FAILED.value:
+            continue
+        error = getattr(record, "error_msg", None)
+        original = original_de_copia(error, documents)
+        if original is not None:
+            # Una copia repetida no es un fallo: se guarda aparte, y solo se
+            # enseña si no hay ningún fallo de verdad que decir antes.
+            if copia_repetida is None:
+                copia_repetida = explicar_copia(_nombre_de(record), original)
+        elif failed_reason is None:
+            failed_reason = _clean_reason(error)
 
     return {
         "total_documents": len(documents),
@@ -286,12 +297,55 @@ async def summarize_memory(rag: Any) -> dict[str, Any]:
         "total_chunks": total_chunks,
         "total_text_chars": total_text_chars,
         "documents_error": None,
-        "failed_reason": failed_reason,
+        "failed_reason": failed_reason or copia_repetida,
+        # Para que la ventana lo pinte como aviso y no como error.
+        "failed_kind": "error" if failed_reason else ("duplicate" if copia_repetida else None),
     }
 
 
 #: Lo que cabe de un motivo de fallo sin convertir el aviso en un muro.
 MAX_REASON = 300
+
+#: El rechazo del motor a indexar dos veces el mismo contenido.
+#:
+#: Llega en inglés y con el identificador interno del original: «Identical
+#: content already exists under another filename. Original doc_id: doc-…,
+#: Status: DocStatus.PROCESSING». Quien lo leía no sabía qué había pasado ni
+#: qué hacer, y en rojo parecía que se había perdido algo. No se ha perdido
+#: nada: el contenido ya está en la memoria, una vez.
+_DUPLICADO = re.compile(
+    r"Identical content already exists under another filename\.\s*"
+    r"Original doc_id:\s*(doc-[0-9a-fA-F]+)"
+)
+
+
+def _nombre_de(record: Any) -> str:
+    ruta = getattr(record, "file_path", "") or ""
+    return ruta.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def original_de_copia(error_msg: Any, documents: dict[str, Any]) -> Optional[str]:
+    """Si el fallo es una copia repetida, el nombre del original; si no, None.
+
+    Devuelve cadena vacía si es una copia pero el original ya no se encuentra
+    —se borró después—: sigue siendo una copia, aunque no se pueda decir de
+    cuál.
+    """
+    encontrado = _DUPLICADO.search(str(error_msg or ""))
+    if encontrado is None:
+        return None
+    original = documents.get(encontrado.group(1))
+    return _nombre_de(original) if original is not None else ""
+
+
+def explicar_copia(copia: str, original: str) -> str:
+    """El aviso de una copia repetida, en castellano y con qué hacer."""
+    de_cual = f"«{original}»" if original else "otro archivo"
+    return (
+        f"«{copia}» tiene exactamente el mismo contenido que {de_cual}, que ya "
+        "está en la memoria, así que no se ha vuelto a leer. No falta nada. "
+        f"Puedes borrar «{copia}» en Archivos: es solo una copia."
+    )
 
 #: Traducción de las excepciones que llegan **sin su mensaje**.
 #:
@@ -482,10 +536,13 @@ def merge_files_with_memory(
                     "doc_id": None,
                     "updated_at": None,
                     "error_msg": None,
+                    "duplicate_of": None,
                 }
             )
         else:
             doc_id, record = encontrado
+            error = getattr(record, "error_msg", None)
+            original = original_de_copia(error, documents)
             payload.update(
                 {
                     "status": getattr(record.status, "value", str(record.status)),
@@ -493,7 +550,13 @@ def merge_files_with_memory(
                     "text_chars": getattr(record, "content_length", None),
                     "doc_id": doc_id,
                     "updated_at": getattr(record, "updated_at", None),
-                    "error_msg": getattr(record, "error_msg", None),
+                    "error_msg": (
+                        explicar_copia(stored.name, original)
+                        if original is not None
+                        else error
+                    ),
+                    # El original, si es una copia repetida; `None` si no.
+                    "duplicate_of": original,
                 }
             )
         rows.append(payload)

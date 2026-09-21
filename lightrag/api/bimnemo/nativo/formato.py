@@ -25,6 +25,9 @@ ESTADOS: dict[str, str] = {
     "preprocessed": "Preprocesado",
     "processed": "En memoria",
     "failed": "Fallido",
+    # Tampoco es un estado del motor: es un «fallido» que en realidad es una
+    # copia de otro archivo que ya está en la memoria. No falta nada.
+    "duplicado": "Copia repetida",
     # No es un estado del motor: lo pone la pantalla mientras espera a que el
     # borrado termine, para que la fila no finja que no está pasando nada.
     "deleting": "Borrando…",

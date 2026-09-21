@@ -99,6 +99,8 @@ _ESTADOS: dict[str, tuple[str, str]] = {
     "processed": ("#10b981", "rgba(16, 185, 129, 0.12)"),
     "failed": ("#ef4444", "rgba(239, 68, 68, 0.12)"),
     "pending": ("#f59e0b", "rgba(245, 158, 11, 0.12)"),
+    # Ámbar y no rojo: pide una acción —borrar la copia— pero no es un error.
+    "duplicado": ("#f59e0b", "rgba(245, 158, 11, 0.12)"),
     "parsing": _OCUPADO,
     "analyzing": _OCUPADO,
     "processing": _OCUPADO,

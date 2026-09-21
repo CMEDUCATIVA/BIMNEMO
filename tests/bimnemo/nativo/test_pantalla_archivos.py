@@ -380,3 +380,36 @@ def test_la_tabla_vacia_explica_por_que(pantalla):
     pantalla._recibir(dict(FICHEROS))
     pantalla.filtros._elegir("photo")
     assert "Nada en esta categoría" in pantalla.vacio.text()
+
+
+# -- copias repetidas -------------------------------------------------------
+
+
+def test_una_copia_repetida_se_ve_como_copia_y_solo_ofrece_borrarla(pantalla):
+    from lightrag.api.bimnemo.nativo.pantalla_archivos import ACCIONES, ESTADO
+
+    copia = {
+        "name": "Error OIR.txt", "size_bytes": 1332, "modified_at": 1758410600.0,
+        "category": "text", "type": "TXT", "status": "failed",
+        "chunks_count": 0, "doc_id": "doc-copia",
+        "error_msg": "«Error OIR.txt» tiene exactamente el mismo contenido que «OIR FB.txt»…",
+        "duplicate_of": "OIR FB.txt",
+    }
+    pantalla._recibir({"files": [copia], "total": 1})
+
+    celda = pantalla.tabla.cellWidget(0, ESTADO)
+    assert "Copia repetida" in _texto(celda)
+    assert "OIR FB.txt" in celda.toolTip()
+
+    botones = _botones(pantalla.tabla.cellWidget(0, ACCIONES))
+    assert len(botones) == 1, "reintentar una copia no sirve de nada"
+    assert "original sigue" in botones[0].toolTip()
+
+
+def test_un_fallo_de_verdad_dice_su_motivo_al_pasar_el_raton(pantalla):
+    from lightrag.api.bimnemo.nativo.pantalla_archivos import ESTADO
+
+    fila = [f["name"] for f in FICHEROS["files"]].index("roto.pdf")
+    celda = pantalla.tabla.cellWidget(fila, ESTADO)
+    assert "Fallido" in _texto(celda)
+    assert "El modelo no respondió" in celda.toolTip()
