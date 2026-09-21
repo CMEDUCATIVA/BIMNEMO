@@ -91,6 +91,19 @@ AMBAR = "#fbbf24"
 #: 16 ms ≈ 60 fotogramas por segundo.
 PASO_MS = 16
 
+# --- Sinapsis ---------------------------------------------------------------
+
+#: Cuánto tarda el impulso en recorrer una arista, en milisegundos.
+SINAPSIS_TRAMO_MS = 420
+
+#: Cuántos saltos se propaga desde el nodo de partida. Con más, el grafo
+#: entero se enciende de una vez y deja de leerse como un recorrido.
+SINAPSIS_SALTOS = 4
+
+#: Cuántas aristas como mucho salen de cada nodo. Un concentrador con
+#: treinta y siete relaciones encendería medio grafo en un solo salto.
+SINAPSIS_RAMAS = 3
+
 
 def radio_de(grado: int) -> float:
     """El mismo tamaño de nodo que la web: crece con la raíz del grado."""
@@ -139,6 +152,11 @@ class Grafo(QWidget):
         #: que puede hacer una interfaz. Vuelve a seguirle el tamaño con el
         #: botón de encajar o al cargar otro grafo.
         self._vista_tocada = False
+        #: Impulsos vivos: (arista, cuándo empezó, cuántos saltos le quedan).
+        self._sinapsis: list[tuple[int, int, float, int]] = []
+        self._reloj_sinapsis = QTimer(self)
+        self._reloj_sinapsis.setInterval(PASO_MS)
+        self._reloj_sinapsis.timeout.connect(self._latir)
 
         self._alpha = 0.0
         self._vista = [0.0, 0.0, 1.0]  # desplazamiento x, y, y escala
@@ -313,6 +331,68 @@ class Grafo(QWidget):
         self._alpha *= ALPHA_DECAY
         self.update()
 
+    # -- sinapsis -----------------------------------------------------------
+
+    def disparar_sinapsis(self, desde: Optional[int] = None) -> None:
+        """Lanza un impulso que recorre las relaciones desde un nodo.
+
+        Sin nodo de partida elige uno al azar **entre los conectados**: el
+        grafo tiene entidades sueltas, y un impulso que sale de una de ellas
+        no recorre nada y parece que no ha pasado.
+        """
+        import random
+
+        if not self._aristas:
+            return
+
+        if desde is None:
+            a, b = random.choice(self._aristas)
+            desde = a if random.random() < 0.5 else b
+
+        self._encender(desde, SINAPSIS_SALTOS)
+        if not self._reloj_sinapsis.isActive():
+            self._reloj_sinapsis.start()
+
+    def _encender(self, nodo: int, saltos: int) -> None:
+        """Enciende las aristas que salen de un nodo."""
+        import random
+        import time
+
+        if saltos <= 0:
+            return
+        vecinas = [
+            (a, b) for a, b in self._aristas if a == nodo or b == nodo
+        ]
+        if not vecinas:
+            return
+
+        ahora = time.monotonic()
+        for a, b in random.sample(vecinas, min(len(vecinas), SINAPSIS_RAMAS)):
+            # Se guarda con el origen primero, para que el impulso viaje
+            # **desde** el nodo que se encendió y no al revés.
+            origen, destino = (a, b) if a == nodo else (b, a)
+            self._sinapsis.append((origen, destino, ahora, saltos))
+
+    def _latir(self) -> None:
+        """Avanza los impulsos y propaga los que llegan al otro extremo."""
+        import time
+
+        if not self._sinapsis:
+            self._reloj_sinapsis.stop()
+            return
+
+        ahora = time.monotonic()
+        siguen = []
+        for origen, destino, cuando, saltos in self._sinapsis:
+            if (ahora - cuando) * 1000.0 < SINAPSIS_TRAMO_MS:
+                siguen.append((origen, destino, cuando, saltos))
+                continue
+            # Llegó: salta al siguiente tramo desde el nodo de destino.
+            self._encender(destino, saltos - 1)
+
+        self._sinapsis = siguen
+        self.update()
+
     # -- vista --------------------------------------------------------------
 
     def encuadrar(self, por_el_usuario: bool = True) -> None:
@@ -484,6 +564,9 @@ class Grafo(QWidget):
                 self._a_pantalla(self._pos[a]), self._a_pantalla(self._pos[b])
             )
 
+        if self._sinapsis:
+            self._pintar_sinapsis(pintor, k)
+
         fuente = QFont(self.font())
         fuente.setPointSizeF(max(6.0, 8.0 * min(k, 1.6)))
         pintor.setFont(fuente)
@@ -578,6 +661,35 @@ class Grafo(QWidget):
                 Qt.AlignHCenter | Qt.AlignTop | Qt.TextSingleLine,
                 texto,
             )
+
+    def _pintar_sinapsis(self, pintor: QPainter, k: float) -> None:
+        """Los impulsos recorriendo sus aristas.
+
+        Se pinta una estela corta, no un punto: un punto de tres píxeles a
+        escala reducida no se ve, y lo que hace reconocible el gesto es el
+        rastro, no el móvil.
+        """
+        import time
+
+        ahora = time.monotonic()
+        for origen, destino, cuando, _saltos in self._sinapsis:
+            avance = min(1.0, (ahora - cuando) * 1000.0 / SINAPSIS_TRAMO_MS)
+
+            a = self._pos[origen]
+            b = self._pos[destino]
+            cabeza = a + (b - a) * avance
+            # La cola va un 18 % por detrás, sin salirse del tramo.
+            cola = a + (b - a) * max(0.0, avance - 0.18)
+
+            # Se apaga al llegar: sin esto, el impulso desaparece de golpe
+            # en el nodo de destino y parece un fallo de dibujo.
+            color = QColor(AMBAR)
+            color.setAlpha(int(235 * (1.0 - avance ** 3)))
+
+            pluma = QPen(color, max(1.6, 2.6 * k))
+            pluma.setCapStyle(Qt.RoundCap)
+            pintor.setPen(pluma)
+            pintor.drawLine(self._a_pantalla(cola), self._a_pantalla(cabeza))
 
     def _pintar_silueta(self, pintor: QPainter, k: float) -> None:
         """El contorno del cerebro, detrás de todo.

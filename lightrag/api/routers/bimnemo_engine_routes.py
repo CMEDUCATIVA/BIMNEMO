@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from lightrag.api.bimnemo import BIMNEMO_NAME, BIMNEMO_VERSION
+from lightrag.api.bimnemo import pulso
 from lightrag.api.bimnemo.build import (
     boot_at,
     boot_id,
@@ -151,6 +152,23 @@ def create_bimnemo_engine_routes(
             working_dir=str(getattr(target_rag, "working_dir", "")),
             input_dir=str(doc_manager.input_dir),
         )
+
+    @router.get(
+        "/pulso",
+        dependencies=[Depends(combined_auth)],
+        summary="Cuántas veces se ha usado la memoria",
+    )
+    async def pulso_de_la_memoria() -> dict[str, Any]:
+        """Un contador que sube cada vez que alguien usa la memoria.
+
+        Lo mira el grafo del Panel para encenderse cuando una IA consulta,
+        guarda o borra. **No cuenta lo que la ventana sondea para pintarse**,
+        o parpadearía sin parar por mirarse a sí mismo.
+
+        Se publica el total y las últimas llamadas, no un registro completo:
+        si hace falta auditoría, el motor la guarda en su log.
+        """
+        return pulso.estado()
 
     @router.get(
         "/app-build",

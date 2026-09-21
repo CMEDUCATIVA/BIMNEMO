@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 
 from lightrag.api.bimnemo.nativo import iconos
 from lightrag.api.bimnemo.nativo.disposicion import DISPOSICIONES, POR_DEFECTO
-from lightrag.api.bimnemo.nativo import formato
+from lightrag.api.bimnemo.nativo import formato, panel_piezas
 from lightrag.api.bimnemo.nativo.grafo import Grafo
 from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo.piezas import Aviso, Fluida, Tarjeta
@@ -57,6 +57,19 @@ ANCHO_DATOS = 296
 #: alto natural más el aire: repartirse el alto con el grafo dejaría el
 #: lienzo por la mitad, y apilado la primera sección **es** el grafo.
 ALTO_CIFRAS_APILADAS = 116
+
+#: Lo que se le reserva al grafo dentro del área con desplazamiento.
+ALTO_MINIMO_GRAFO = 520
+
+#: Cada cuánto late el grafo por su cuenta.
+LATIDO_MS = 5000
+
+#: Cada cuánto se pregunta si alguien ha usado la memoria.
+#:
+#: Dos segundos y no medio: es una petición más contra el motor, y lo que se
+#: gana con ir más deprisa es que la sinapsis salga un segundo antes. La
+#: propia consulta no cuenta como uso, así que no se muerde la cola.
+SONDEO_PULSO_MS = 2000
 
 PROFUNDIDADES = (
     (1, "1 salto"),
@@ -293,33 +306,120 @@ def _campo(rotulo: str, control: QWidget, ancho: int = 0) -> QWidget:
 
 
 class PantallaPanel(QWidget):
+    #: Han pulsado una memoria en la tabla: hay que abrirla.
+    memoria_elegida = Signal(str)
+    #: Han pulsado una categoría: hay que ir a Archivos con ese filtro.
+    categoria_elegida = Signal(str)
+
     def __init__(self, motor: Motor) -> None:
         super().__init__()
         self.motor = motor
         self._apilado: Optional[bool] = None
 
         raiz = QVBoxLayout(self)
-        raiz.setContentsMargins(32, 28, 32, 24)
-        raiz.setSpacing(14)
+        raiz.setContentsMargins(0, 0, 0, 0)
+        raiz.setSpacing(0)
+
+        # Con desplazamiento: el panel ya no cabe en una pantalla —grafo,
+        # cifras, reparto del disco, memorias, categorías y tipos—, y lo que
+        # no cabe tiene que poder alcanzarse.
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        raiz.addWidget(area)
+
+        dentro = QWidget()
+        columna = QVBoxLayout(dentro)
+        columna.setContentsMargins(32, 28, 32, 24)
+        columna.setSpacing(14)
+        area.setWidget(dentro)
 
         titulo = QLabel("Panel")
         titulo.setObjectName("titulo")
-        raiz.addWidget(titulo)
+        columna.addWidget(titulo)
 
         self.aviso = Aviso()
-        raiz.addWidget(self.aviso)
+        columna.addWidget(self.aviso)
 
         self.rejilla = QGridLayout()
         self.rejilla.setContentsMargins(0, 0, 0, 0)
         self.rejilla.setHorizontalSpacing(16)
         self.rejilla.setVerticalSpacing(16)
-        raiz.addLayout(self.rejilla, 1)
+        arriba = QWidget()
+        arriba.setObjectName("fila")
+        arriba.setLayout(self.rejilla)
+        # Alto mínimo: dentro de un área con desplazamiento, el grafo se
+        # encogería hasta su tamaño natural —unos pocos píxeles— y dejaría
+        # de ser la pieza principal de la pantalla.
+        arriba.setMinimumHeight(ALTO_MINIMO_GRAFO)
+        columna.addWidget(arriba)
+
+        columna.addWidget(self._almacenamiento())
+        columna.addWidget(self._memorias())
+        columna.addWidget(self._categorias_y_tipos())
+        columna.addStretch(1)
 
         self.columna_grafo = self._columna_grafo()
         self.columna_datos = self._columna_datos()
         self._colocar_columnas(apilado=False)
 
+        # El grafo late solo cada cinco segundos, y además cada vez que
+        # alguien usa la memoria por la API.
+        self._pulso_visto: Optional[int] = None
+
+        self._latido = QTimer(self)
+        self._latido.setInterval(LATIDO_MS)
+        self._latido.timeout.connect(self._latir)
+        self._latido.start()
+
+        self._sondeo_pulso = QTimer(self)
+        self._sondeo_pulso.setInterval(SONDEO_PULSO_MS)
+        self._sondeo_pulso.timeout.connect(self._mirar_pulso)
+        self._sondeo_pulso.start()
+
         self.refrescar()
+
+    # -- latido -------------------------------------------------------------
+
+    def _latir(self) -> None:
+        """El latido de fondo. Solo si la pantalla está a la vista.
+
+        Un grafo animándose en una pestaña que nadie mira es un ventilador
+        encendido para nada.
+        """
+        if self.isVisible():
+            self.grafo.disparar_sinapsis()
+
+    def _mirar_pulso(self) -> None:
+        self.motor.get("/bimnemo/pulso", self._pulso, None)
+
+    def _pulso(self, datos: Any) -> None:
+        """Enciende el grafo cuando alguien ha usado la memoria.
+
+        La primera respuesta solo se apunta: al abrir, el contador ya trae
+        todo lo que se usó antes, y dispararlo sería un fogonazo por cosas
+        que pasaron ayer.
+        """
+        if not isinstance(datos, dict):
+            return
+        total = datos.get("total")
+        if not isinstance(total, int):
+            return
+
+        if self._pulso_visto is None:
+            self._pulso_visto = total
+            return
+
+        cuantas = total - self._pulso_visto
+        self._pulso_visto = total
+        if cuantas <= 0 or not self.isVisible():
+            return
+
+        # Una sinapsis por llamada, hasta tres: con una ráfaga de veinte,
+        # el grafo se enciende entero y no se distingue nada.
+        for _ in range(min(cuantas, 3)):
+            self.grafo.disparar_sinapsis()
 
     # -- columnas -----------------------------------------------------------
 
@@ -366,6 +466,79 @@ class PantallaPanel(QWidget):
         self._colocar_columnas(self.width() < ANCHO_MINIMO_DOS_COLUMNAS)
 
     # -- columna izquierda: el grafo ----------------------------------------
+
+    # -- secciones de abajo -------------------------------------------------
+
+    def _seccion(self, icono: str, titulo: str) -> tuple:
+        """Una tarjeta con su encabezado y un rótulo suelto a la derecha."""
+        tarjeta = Tarjeta()
+
+        cabecera = QWidget()
+        cabecera.setObjectName("fila")
+        fila = QHBoxLayout(cabecera)
+        fila.setContentsMargins(0, 0, 0, 0)
+        fila.setSpacing(8)
+
+        marca = QLabel()
+        iconos.poner(marca, icono, 15, "azul")
+        fila.addWidget(marca)
+
+        rotulo = QLabel(titulo)
+        rotulo.setObjectName("subtitulo")
+        fila.addWidget(rotulo)
+        fila.addStretch(1)
+
+        pista = QLabel("")
+        pista.setObjectName("pista")
+        fila.addWidget(pista)
+
+        tarjeta.anadir(cabecera)
+        return tarjeta, pista
+
+    def _almacenamiento(self) -> QWidget:
+        """El reparto del disco por categoría, sumando todas las memorias."""
+        tarjeta, self.pista_almacenado = self._seccion("disco", "Almacenamiento por categoría")
+
+        self.medidor = panel_piezas.Medidor()
+        tarjeta.anadir(self.medidor)
+
+        self.leyenda = panel_piezas.Leyenda()
+        tarjeta.anadir(self.leyenda)
+        return tarjeta
+
+    def _memorias(self) -> QWidget:
+        tarjeta, pista = self._seccion("memorias", "Memorias")
+        pista.setText("Pulsa una para trabajar en ella")
+
+        self.tabla_memorias = panel_piezas.TablaMemorias()
+        self.tabla_memorias.elegida.connect(self.memoria_elegida.emit)
+        tarjeta.anadir(self.tabla_memorias)
+        return tarjeta
+
+    def _categorias_y_tipos(self) -> QWidget:
+        """Las dos juntas: el catálogo a la izquierda y los tipos a la derecha.
+
+        Comparten fila porque contestan la misma pregunta a dos niveles —qué
+        hay guardado—, y separadas dejaban media pantalla vacía.
+        """
+        caja_exterior = QWidget()
+        caja_exterior.setObjectName("fila")
+        fila = QHBoxLayout(caja_exterior)
+        fila.setContentsMargins(0, 0, 0, 0)
+        fila.setSpacing(14)
+
+        izquierda, self.pista_categorias = self._seccion("categorias", "Categorías")
+        self.rejilla_categorias = panel_piezas.RejillaCategorias()
+        self.rejilla_categorias.elegida.connect(self.categoria_elegida.emit)
+        izquierda.anadir(self.rejilla_categorias)
+        fila.addWidget(izquierda, 2)
+
+        derecha, self.pista_tipos = self._seccion("tipos", "Tipos de archivo")
+        self.lista_tipos = panel_piezas.ListaTipos()
+        derecha.anadir(self.lista_tipos)
+        derecha.columna.addStretch(1)
+        fila.addWidget(derecha, 1)
+        return caja_exterior
 
     def _columna_grafo(self) -> QWidget:
         # La tarjeta con su borde: el grafo es una sección de la pantalla y
@@ -456,13 +629,18 @@ class PantallaPanel(QWidget):
         columna.setContentsMargins(14, 12, 14, 12)
         columna.setSpacing(6)
 
-        self.leyenda = QWidget()
-        self.leyenda.setObjectName("fila")
+        # `leyenda_tipos` y no `leyenda`: en esta pantalla hay **dos**
+        # leyendas —la de tipos de entidad del grafo y la del reparto del
+        # disco— y las dos se llamaban igual. La segunda en construirse
+        # pisaba a la primera, y al pintar el reparto se llamaba a un
+        # método que el widget del grafo no tiene.
+        self.leyenda_tipos = QWidget()
+        self.leyenda_tipos.setObjectName("fila")
         # Envuelve: con nueve tipos y la ventana estrecha, una fila sola les
         # recorta el nombre y deja «conce 79» en vez de «concepto 79».
         self.caja_leyenda = Fluida(separacion=14, salto=4, centrado=True)
-        self.leyenda.setLayout(self.caja_leyenda)
-        columna.addWidget(self.leyenda)
+        self.leyenda_tipos.setLayout(self.caja_leyenda)
+        columna.addWidget(self.leyenda_tipos)
 
         ayuda = QLabel(
             "Arrastra para mover el lienzo, rueda para acercar, y pulsa una "
@@ -651,6 +829,8 @@ class PantallaPanel(QWidget):
             cifra.poner("…", "")
         self.grafo.poner([], [])
         self.resumen_grafo.setText("Cargando…")
+        self.lista_tipos.poner([], 0)
+        self.pista_tipos.setText("")
 
     def retematizar(self) -> None:
         """El lienzo del grafo se pinta a mano: hay que pedirle que repinte."""
@@ -663,16 +843,23 @@ class PantallaPanel(QWidget):
         self._cargar_grafo()
 
     def _pintar_cifras(self, datos: Any) -> None:
-        """Lo de ESTA memoria: la cuarta tarjeta."""
+        """Lo de ESTA memoria: la cuarta tarjeta y los tipos de archivo."""
         if not isinstance(datos, dict):
             return
         self.aviso.callar()
         memoria = datos.get("memory") or {}
+        almacen = datos.get("storage") or {}
 
         self.cifras["memoria"].poner(
             formato.numero(memoria.get("total_documents")),
             f"{formato.numero(memoria.get('total_chunks'))} fragmentos indexados",
         )
+
+        # Los tipos SÍ son de la memoria abierta: es el detalle de dónde
+        # estás, no el inventario general.
+        tipos = almacen.get("types") or []
+        self.pista_tipos.setText(f"{len(tipos)} tipo" + ("" if len(tipos) == 1 else "s"))
+        self.lista_tipos.poner(tipos, almacen.get("total_bytes"))
 
         fallo = memoria.get("documents_error") or memoria.get("failed_reason")
         if fallo:
@@ -702,6 +889,22 @@ class PantallaPanel(QWidget):
         en_uso = sum(1 for c in categorias if (c.get("files") or 0) > 0)
         self.cifras["categorias"].poner(
             f"{en_uso} / {len(categorias)}", "En uso sobre el catálogo"
+        )
+
+        # El reparto del disco, las memorias y el catálogo: los tres miran a
+        # todas las memorias a la vez, y por eso salen del mismo agregado.
+        octetos = total.get("total_bytes")
+        self.pista_almacenado.setText(formato.tamano(octetos))
+        self.medidor.poner(categorias, octetos)
+        self.leyenda.poner(categorias, octetos)
+
+        self.pista_categorias.setText(f"{en_uso} de {len(categorias)} en uso")
+        self.rejilla_categorias.poner(categorias, octetos)
+
+        # La memoria abierta se marca aquí: el motor sabe cuál es, así que no
+        # hace falta que nadie se la diga a esta pantalla.
+        self.tabla_memorias.poner(
+            datos.get("nemos") or [], octetos, self.motor.memoria
         )
 
     def _pintar_grafo_cifras(self, datos: Any) -> None:

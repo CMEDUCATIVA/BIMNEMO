@@ -38,6 +38,7 @@ from lightrag.api.utils_api import (
     internal_server_error,
 )
 from lightrag.api.admission_middleware import AdmissionMiddleware
+from lightrag.api.bimnemo import pulso
 from lightrag.api.body_limit_middleware import BodyLimitMiddleware, resolve_body_limits
 from .config import (
     global_args,
@@ -1817,6 +1818,20 @@ def create_app(args):
     # docstring.
     if api_prefix:
         app.add_middleware(_RootPathNormalizationMiddleware)
+
+    # BIMNEMO: apunta cuándo alguien usa la memoria, para que el grafo del
+    # Panel se encienda. Solo cuenta consultar, guardar y borrar — nunca lo
+    # que la propia ventana sondea para pintarse. Ver `bimnemo/pulso.py`.
+    @app.middleware("http")
+    async def _bimnemo_pulso(request, call_next):
+        respuesta = await call_next(request)
+        try:
+            if respuesta.status_code < 400:
+                pulso.anotar(request.method, request.url.path)
+        except Exception:  # noqa: BLE001
+            # Un contador decorativo no puede tumbar una petición real.
+            pass
+        return respuesta
 
     # Pre-body admission control (LR2 §9.3). Installed only when there is a
     # capacity to enforce; the ingestion routes keep their own reservation, so an
