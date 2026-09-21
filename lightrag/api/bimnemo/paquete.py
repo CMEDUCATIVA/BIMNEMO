@@ -240,13 +240,19 @@ def pyproject_cambio(raiz: Path, antes: Optional[bytes]) -> bool:
     Se compara el contenido de antes con el de ahora en vez de mirar fechas:
     copiar un fichero idéntico también cambia su fecha, y correr `pip` por eso
     añadiría un minuto a cada actualización para no hacer nada.
+
+    **Sin mirar los saltos de línea.** El instalado sale de una copia de
+    Windows (CRLF) y el que llega de GitHub trae LF: comparando bytes, el
+    mismo fichero parecía distinto, y cada actualización pasaba 40 segundos
+    en `pip` para no instalar nada.
     """
     if antes is None:
         return True
     try:
-        return (raiz / "pyproject.toml").read_bytes() != antes
+        ahora = (raiz / "pyproject.toml").read_bytes()
     except OSError:
         return True
+    return ahora.replace(b"\r\n", b"\n") != antes.replace(b"\r\n", b"\n")
 
 
 def leer_pyproject(raiz: Path) -> Optional[bytes]:

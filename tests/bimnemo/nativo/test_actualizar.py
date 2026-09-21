@@ -177,3 +177,37 @@ def test_la_copia_nueva_espera_a_que_la_vieja_termine():
     inicio = time.monotonic()
     esperar_a_que_termine(vieja.pid, segundos=10)
     assert time.monotonic() - inicio < 2
+
+
+# -- sin ventanas negras ----------------------------------------------------
+
+
+def test_los_saltos_de_linea_no_cuentan_como_dependencias_nuevas(tmp_path):
+    """El mismo pyproject con CRLF y con LF: pip no tiene nada que hacer."""
+    from lightrag.api.bimnemo.paquete import pyproject_cambio
+
+    (tmp_path / "pyproject.toml").write_bytes(b'[project]\nname = "x"\n')
+    assert pyproject_cambio(tmp_path, b'[project]\r\nname = "x"\r\n') is False
+    assert pyproject_cambio(tmp_path, b'[project]\r\nname = "y"\r\n') is True
+
+
+def test_pip_y_git_se_lanzan_sin_ventana(monkeypatch):
+    """BIMNEMO corre sin consola: lo que lance de consola recibiría una."""
+    from lightrag.api.bimnemo import actualizacion
+
+    banderas = []
+
+    class Hecho:
+        returncode, stdout, stderr = 0, "", ""
+
+    def falso(orden, **kw):
+        banderas.append(kw.get("creationflags", 0))
+        return Hecho()
+
+    monkeypatch.setattr(actualizacion.subprocess, "run", falso)
+    actualizacion.instalar_dependencias()
+    actualizacion._git("status")
+
+    assert banderas == [actualizacion.SIN_VENTANA] * 2
+    if sys.platform == "win32":
+        assert actualizacion.SIN_VENTANA != 0

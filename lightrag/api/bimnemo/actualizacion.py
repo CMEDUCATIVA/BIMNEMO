@@ -53,6 +53,12 @@ def raiz() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+#: Para lanzar programas de consola —git, pip— sin que se abra una ventana
+#: negra. BIMNEMO corre sin consola, y un programa de consola lanzado desde
+#: uno así recibe una ventana propia que aparece encima de todo.
+SIN_VENTANA = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _git(*args: str, timeout: float = 30.0) -> tuple[int, str]:
     """Ejecuta git en la raíz y devuelve (código, salida)."""
     try:
@@ -62,6 +68,7 @@ def _git(*args: str, timeout: float = 30.0) -> tuple[int, str]:
             capture_output=True,
             text=True,
             timeout=timeout,
+            creationflags=SIN_VENTANA,
         )
         return proc.returncode, (proc.stdout + proc.stderr).strip()
     except FileNotFoundError:
@@ -291,6 +298,7 @@ def instalar_dependencias() -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=900.0,
+            creationflags=SIN_VENTANA,
         )
         return proc.returncode == 0, (proc.stdout + proc.stderr)[-600:]
     except subprocess.TimeoutExpired:
