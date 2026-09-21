@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from lightrag.api.bimnemo.nativo import iconos
 from lightrag.api.bimnemo.nativo.disposicion import DISPOSICIONES
+from lightrag.api.bimnemo.nativo import formato
 from lightrag.api.bimnemo.nativo.grafo import Grafo
 from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo.piezas import Aviso, Fluida, Tarjeta
@@ -46,43 +47,158 @@ from lightrag.api.bimnemo.nativo.piezas import Aviso, Fluida, Tarjeta
 #: Por debajo de esto, las dos columnas se apilan.
 ANCHO_MINIMO_DOS_COLUMNAS = 1120
 
-#: Proporción de la columna del grafo frente a la de datos.
-PESO_GRAFO = 5
-PESO_DATOS = 3
+#: Ancho de la columna de datos. Fijo y no proporcional: el grafo es lo que
+#: se viene a ver, así que todo lo que sobra al ensanchar la ventana se lo
+#: queda él. Con una proporción, la columna de texto crecía sin necesidad y
+#: le robaba sitio al lienzo.
+ANCHO_DATOS = 296
 
 PROFUNDIDADES = ((1, "1 salto"), (2, "2 saltos"), (3, "3 saltos"),
                  (4, "4 saltos"), (5, "5 saltos"))
 TOPES = (100, 250, 500, 1000)
 TOPE_POR_DEFECTO = 250
 
-#: Las cifras del panel: clave del dato, icono e rótulo.
-CIFRAS = (
-    ("archivos", "ficheros", "Archivos"),
-    ("tamano", "disco", "Almacenado"),
-    ("documentos", "documento", "Documentos"),
-    ("trozos", "trozos", "Trozos"),
-    ("entidades", "entidades", "Entidades"),
-    ("relaciones", "relaciones", "Relaciones"),
+#: Las cifras del panel: icono y rótulo de cada dato.
+CIFRAS = {
+    "archivos": ("ficheros", "Archivos"),
+    "tamano": ("disco", "Almacenado"),
+    "documentos": ("documento", "Documentos"),
+    "trozos": ("trozos", "Trozos"),
+    "entidades": ("entidades", "Entidades"),
+    "relaciones": ("relaciones", "Relaciones"),
+}
+
+#: Cómo se agrupan. Son tres preguntas distintas —qué ocupa, qué entendió el
+#: motor y qué dibuja el grafo— y en una lista seguida de seis números nadie
+#: distingue cuál responde a cuál.
+BLOQUES_DE_CIFRAS = (
+    ("Almacenamiento", ("archivos", "tamano")),
+    ("En memoria", ("documentos", "trozos")),
+    ("Grafo", ("entidades", "relaciones")),
 )
 
 
-def _numero(valor: Any) -> str:
-    try:
-        return f"{int(valor):,}".replace(",", ".")
-    except (TypeError, ValueError):
-        return "—"
+#: Ancho de la ficha dentro del lienzo, y su separación del borde.
+ANCHO_FICHA = 286
+MARGEN_FICHA = 14
+
+#: Con qué separa LightRAG los trozos que ha fundido en una sola entidad.
+#:
+#: Cuando la misma entidad aparece en varios documentos, el motor concatena
+#: sus descripciones con esta marca. Enseñarla en crudo deja un «<SEP>» en
+#: mitad de la frase que no significa nada para quien lo lee.
+SEPARADOR = "<SEP>"
 
 
-def _tamano(octetos: Any) -> str:
-    try:
-        n = float(octetos)
-    except (TypeError, ValueError):
-        return "—"
-    for unidad in ("B", "KB", "MB", "GB"):
-        if n < 1024 or unidad == "GB":
-            return f"{n:.0f} {unidad}" if unidad == "B" else f"{n:.1f} {unidad}"
-        n /= 1024
-    return "—"
+def _partes(texto: str) -> list[str]:
+    """Los trozos que el motor fundió, cada uno por su lado."""
+    return [t.strip() for t in str(texto or "").split(SEPARADOR) if t.strip()]
+
+
+class Ficha(QFrame):
+    """La ficha de una entidad, flotando sobre el lienzo del grafo.
+
+    Es hija del widget del grafo y se coloca a mano sobre su lado derecho,
+    no dentro de ninguna disposición: una ficha que empuja el lienzo lo
+    encoge al abrirse y mueve de sitio lo que el usuario acaba de pulsar.
+    """
+
+    from PySide6.QtCore import Signal as _Signal
+
+    cerrada = _Signal()
+
+    def __init__(self, lienzo: QWidget) -> None:
+        super().__init__(lienzo)
+        self.setObjectName("ficha")
+        self.setFixedWidth(ANCHO_FICHA)
+
+        columna = QVBoxLayout(self)
+        columna.setContentsMargins(14, 12, 14, 14)
+        columna.setSpacing(8)
+
+        cabecera = QWidget()
+        cabecera.setObjectName("fila")
+        fila = QHBoxLayout(cabecera)
+        fila.setContentsMargins(0, 0, 0, 0)
+        fila.setSpacing(8)
+
+        self.nombre = QLabel("—")
+        self.nombre.setObjectName("ficha-nombre")
+        self.nombre.setWordWrap(True)
+        fila.addWidget(self.nombre, 1)
+
+        cerrar = QPushButton("✕")
+        cerrar.setObjectName("ficha-cerrar")
+        cerrar.setCursor(Qt.PointingHandCursor)
+        cerrar.setFixedSize(24, 24)
+        cerrar.setToolTip("Cerrar la ficha")
+        cerrar.clicked.connect(self.cerrada.emit)
+        fila.addWidget(cerrar, 0, Qt.AlignTop)
+        columna.addWidget(cabecera)
+
+        self.insignia = QLabel("")
+        self.insignia.setObjectName("ficha-tipo")
+        columna.addWidget(self.insignia)
+
+        self.relaciones = QLabel("")
+        self.relaciones.setObjectName("descripcion")
+        columna.addWidget(self.relaciones)
+
+        self.descripcion = QLabel("")
+        self.descripcion.setObjectName("ficha-texto")
+        self.descripcion.setWordWrap(True)
+        self.descripcion.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        columna.addWidget(self.descripcion)
+
+        self.origen = QLabel("")
+        self.origen.setObjectName("descripcion")
+        self.origen.setWordWrap(True)
+        columna.addWidget(self.origen)
+
+        columna.addStretch(1)
+        self.hide()
+
+    def mostrar(self, nodo: dict) -> None:
+        self.nombre.setText(str(nodo.get("label") or nodo.get("id") or "—"))
+
+        tipo = str(nodo.get("type") or "")
+        self.insignia.setText(tipo.upper() if tipo else "")
+        self.insignia.setVisible(bool(tipo))
+
+        grado = nodo.get("degree")
+        self.relaciones.setText(
+            f"{formato.numero(grado)} relaciones" if grado is not None else ""
+        )
+
+        # Una línea en blanco entre trozos, no un «<SEP>» a media frase.
+        trozos = _partes(nodo.get("description"))
+        self.descripcion.setText("\n\n".join(trozos))
+        self.descripcion.setVisible(bool(trozos))
+
+        documentos = _partes(nodo.get("file_path"))
+        self.origen.setText(
+            "De: " + "\nY de: ".join(documentos) if documentos else ""
+        )
+        self.origen.setVisible(bool(documentos))
+
+        self.recolocar()
+        self.show()
+        self.raise_()
+
+    def ocultar(self) -> None:
+        self.hide()
+
+    def recolocar(self) -> None:
+        """Arriba a la derecha del lienzo, sin salirse nunca."""
+        padre = self.parentWidget()
+        if padre is None:
+            return
+        alto = min(
+            max(self.sizeHint().height(), 120),
+            max(padre.height() - 2 * MARGEN_FICHA, 120),
+        )
+        self.setFixedHeight(alto)
+        self.move(padre.width() - ANCHO_FICHA - MARGEN_FICHA, MARGEN_FICHA)
 
 
 class Cifra(QWidget):
@@ -140,6 +256,10 @@ def _campo(rotulo: str, control: QWidget, ancho: int = 0) -> QWidget:
 
     etiqueta = QLabel(rotulo)
     etiqueta.setObjectName("rotulo-campo")
+    # Alto fijo: el grupo de botones lleva un rótulo vacío, y sin esto su
+    # etiqueta medía distinto que las demás y los botones quedaban unos
+    # píxeles más abajo — desde fuera, «en una segunda fila».
+    etiqueta.setFixedHeight(14)
     columna.addWidget(etiqueta)
     columna.addWidget(control)
     if ancho:
@@ -192,11 +312,13 @@ class PantallaPanel(QWidget):
             self.rejilla.addWidget(self.columna_datos, 1, 0)
             self.rejilla.setColumnStretch(0, 1)
             self.rejilla.setColumnStretch(1, 0)
+            self.columna_datos.setMaximumWidth(16777215)
         else:
             self.rejilla.addWidget(self.columna_grafo, 0, 0)
             self.rejilla.addWidget(self.columna_datos, 0, 1)
-            self.rejilla.setColumnStretch(0, PESO_GRAFO)
-            self.rejilla.setColumnStretch(1, PESO_DATOS)
+            self.rejilla.setColumnStretch(0, 1)
+            self.rejilla.setColumnStretch(1, 0)
+            self.columna_datos.setFixedWidth(ANCHO_DATOS)
 
         self.columna_grafo.show()
         self.columna_datos.show()
@@ -237,13 +359,36 @@ class PantallaPanel(QWidget):
         self.grafo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         tarjeta.anadir(self.grafo)
 
+        # La ficha vive **dentro** del lienzo, pegada a su lado derecho: es
+        # hija del grafo, no una tarjeta más de la columna. Así se lee sin
+        # apartar la vista de la entidad que se acaba de pulsar.
+        self.ficha = Ficha(self.grafo)
+        self.ficha.cerrada.connect(self._soltar_seleccion)
+        self.grafo.installEventFilter(self)
+
+        tarjeta.anadir(self._pie())
+        return tarjeta
+
+    def _pie(self) -> QWidget:
+        """Leyenda y ayuda, con su propio fondo.
+
+        Sueltas sobre la tarjeta parecían flotar encima del lienzo. Puestas
+        en su propia banda, con fondo y un borde arriba, se leen como lo que
+        son: el pie del grafo, no parte del dibujo.
+        """
+        pie = QFrame()
+        pie.setObjectName("pie-grafo")
+        columna = QVBoxLayout(pie)
+        columna.setContentsMargins(12, 10, 12, 10)
+        columna.setSpacing(6)
+
         self.leyenda = QWidget()
         self.leyenda.setObjectName("fila")
         # Envuelve: con nueve tipos y la ventana estrecha, una fila sola les
         # recorta el nombre y deja «conce 79» en vez de «concepto 79».
         self.caja_leyenda = Fluida(separacion=14, salto=4)
         self.leyenda.setLayout(self.caja_leyenda)
-        tarjeta.anadir(self.leyenda)
+        columna.addWidget(self.leyenda)
 
         ayuda = QLabel(
             "Arrastra para mover el lienzo, rueda para acercar, y pulsa una "
@@ -251,8 +396,25 @@ class PantallaPanel(QWidget):
         )
         ayuda.setObjectName("descripcion")
         ayuda.setWordWrap(True)
-        tarjeta.anadir(ayuda)
-        return tarjeta
+        columna.addWidget(ayuda)
+        return pie
+
+    def eventFilter(self, objeto, evento):  # noqa: N802 (nombre de Qt)
+        """Recoloca la ficha cuando el lienzo cambia de tamaño."""
+        from PySide6.QtCore import QEvent
+
+        if objeto is self.grafo and evento.type() == QEvent.Resize:
+            self.ficha.recolocar()
+        return super().eventFilter(objeto, evento)
+
+    def _soltar_seleccion(self) -> None:
+        """Cerrar la ficha también suelta la entidad elegida.
+
+        Si no, la ficha desaparece pero el grafo sigue con las relaciones
+        aisladas y el resto apagado, y no hay forma de entender por qué.
+        """
+        self.grafo.soltar()
+        self.ficha.ocultar()
 
     def _barra(self) -> QWidget:
         barra = QWidget()
@@ -262,6 +424,7 @@ class PantallaPanel(QWidget):
         fila.setSpacing(10)
 
         self.entidad = QComboBox()
+        self.entidad.setMinimumWidth(96)
         self.entidad.addItem("Todo el grafo", "*")
         self.entidad.currentIndexChanged.connect(self._cargar_grafo)
         fila.addWidget(_campo("Entidad de partida", self.entidad), 2)
@@ -289,6 +452,7 @@ class PantallaPanel(QWidget):
         fila.addWidget(_campo("Disposición", self.disposicion, 168))
 
         self.busqueda = QLineEdit()
+        self.busqueda.setMinimumWidth(96)
         self.busqueda.setPlaceholderText("Resaltar por nombre…")
         self.busqueda.textChanged.connect(self._buscar)
         self.campo_busqueda = _campo("Buscar entidad", self.busqueda)
@@ -308,7 +472,10 @@ class PantallaPanel(QWidget):
             boton = _boton_icono(nombre, pista)
             boton.clicked.connect(accion)
             caja.addWidget(boton)
-        fila.addWidget(_campo(" ", acciones))
+        # El grupo de botones no se encoge ni se va de fila: ancho fijo y
+        # al final. Lo que cede sitio al estrechar son los desplegables.
+        caja_acciones = _campo("", acciones, 32 * 4 + 4 * 3)
+        fila.addWidget(caja_acciones, 0)
         return barra
 
     # -- columna derecha: los datos -----------------------------------------
@@ -326,23 +493,18 @@ class PantallaPanel(QWidget):
         columna.setContentsMargins(0, 0, 8, 0)
         columna.setSpacing(16)
 
-        tarjeta = Tarjeta("Esta memoria")
+        # Tres bloques y no uno: «lo que ocupa en disco», «lo que el motor
+        # entendió» y «lo que dibuja el grafo» son tres cosas distintas, y en
+        # una lista seguida de seis números nadie distingue cuál es cuál.
         self.cifras: dict[str, Cifra] = {}
-        for clave, icono_nombre, rotulo in CIFRAS:
-            pieza = Cifra(icono_nombre, rotulo)
-            self.cifras[clave] = pieza
-            tarjeta.anadir(pieza)
-        columna.addWidget(tarjeta)
-
-        self.tarjeta_detalle = Tarjeta("Entidad")
-        self.detalle_nombre = self.tarjeta_detalle.dato("Nombre", "—")
-        self.detalle_tipo = self.tarjeta_detalle.dato("Tipo", "—")
-        self.detalle_grado = self.tarjeta_detalle.dato("Relaciones", "—")
-        self.detalle_origen = self.tarjeta_detalle.dato("Documento", "—")
-        self.detalle_texto = self.tarjeta_detalle.dato("Descripción", "—")
-        # Escondida hasta que se pulse algo: cinco guiones no informan de nada.
-        self.tarjeta_detalle.hide()
-        columna.addWidget(self.tarjeta_detalle)
+        for titulo, claves in BLOQUES_DE_CIFRAS:
+            tarjeta = Tarjeta(titulo)
+            for clave in claves:
+                icono_nombre, rotulo = CIFRAS[clave]
+                pieza = Cifra(icono_nombre, rotulo)
+                self.cifras[clave] = pieza
+                tarjeta.anadir(pieza)
+            columna.addWidget(tarjeta)
 
         columna.addStretch(1)
         envoltorio.setWidget(dentro)
@@ -362,10 +524,10 @@ class PantallaPanel(QWidget):
         almacen = datos.get("storage") or {}
         memoria = datos.get("memory") or {}
 
-        self.cifras["archivos"].poner(_numero(almacen.get("total_files")))
-        self.cifras["tamano"].poner(_tamano(almacen.get("total_bytes")))
-        self.cifras["documentos"].poner(_numero(memoria.get("total_documents")))
-        self.cifras["trozos"].poner(_numero(memoria.get("total_chunks")))
+        self.cifras["archivos"].poner(formato.numero(almacen.get("total_files")))
+        self.cifras["tamano"].poner(formato.tamano(almacen.get("total_bytes")))
+        self.cifras["documentos"].poner(formato.numero(memoria.get("total_documents")))
+        self.cifras["trozos"].poner(formato.numero(memoria.get("total_chunks")))
 
         fallo = memoria.get("documents_error") or memoria.get("failed_reason")
         if fallo:
@@ -374,8 +536,8 @@ class PantallaPanel(QWidget):
     def _pintar_grafo_cifras(self, datos: Any) -> None:
         if not isinstance(datos, dict):
             return
-        self.cifras["entidades"].poner(_numero(datos.get("entities")))
-        self.cifras["relaciones"].poner(_numero(datos.get("relations")))
+        self.cifras["entidades"].poner(formato.numero(datos.get("entities")))
+        self.cifras["relaciones"].poner(formato.numero(datos.get("relations")))
 
     def _cargar_grafo(self) -> None:
         etiqueta = self.entidad.currentData() or "*"
@@ -473,14 +635,9 @@ class PantallaPanel(QWidget):
 
     def _pintar_detalle(self, nodo: Optional[dict]) -> None:
         if not nodo:
-            self.tarjeta_detalle.hide()
+            self.ficha.ocultar()
             return
-        self.detalle_nombre.setText(str(nodo.get("label") or nodo.get("id") or "—"))
-        self.detalle_tipo.setText(str(nodo.get("type") or "—"))
-        self.detalle_grado.setText(_numero(nodo.get("degree")))
-        self.detalle_origen.setText(str(nodo.get("file_path") or "—"))
-        self.detalle_texto.setText(str(nodo.get("description") or "—"))
-        self.tarjeta_detalle.show()
+        self.ficha.mostrar(nodo)
 
     def _fallo(self, motivo: str) -> None:
         self.aviso.fallar(motivo)

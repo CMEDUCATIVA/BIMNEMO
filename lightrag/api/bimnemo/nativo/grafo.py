@@ -289,9 +289,12 @@ class Grafo(QWidget):
         ancho = max(float(maximos[0] - minimos[0]), 1.0)
         alto = max(float(maximos[1] - minimos[1]), 1.0)
 
-        margen = 60.0
+        # Tope de 1.0 y no de 2.0: con pocas entidades el encuadre se pegaba
+        # hasta duplicar el tamaño natural y el grafo entraba «con lupa». Un
+        # grafo se lee mejor con aire alrededor que ocupando hasta el borde.
+        margen = 110.0
         escala = min(
-            (self.width() - margen) / ancho, (self.height() - margen) / alto, 2.0
+            (self.width() - margen) / ancho, (self.height() - margen) / alto, 1.0
         )
         centro = (minimos + maximos) / 2.0
         self._vista = [
@@ -325,6 +328,12 @@ class Grafo(QWidget):
         """
         descompuesto = unicodedata.normalize("NFD", texto.lower())
         return "".join(c for c in descompuesto if unicodedata.category(c) != "Mn")
+
+    def soltar(self) -> None:
+        """Deshace la selección: ni nodo elegido ni relaciones aisladas."""
+        self._elegido = None
+        self._aislar(None)
+        self.update()
 
     def resaltar(self, texto: str) -> int:
         """Marca las entidades cuyo nombre contenga `texto`. Devuelve cuántas.
@@ -415,17 +424,31 @@ class Grafo(QWidget):
             centro = self._a_pantalla(self._pos[i])
             radio = self._radio[i] * k
 
+            buscando = bool(self._resaltados)
+            casa = i in self._resaltados
+
             color = QColor(self._color[i])
             if aislando and i not in self._vecinos:
                 # Apagado, no escondido: sigue dando forma al conjunto.
                 color.setAlpha(45)
+            if buscando and not casa:
+                # Buscando, lo que no casa se apaga. Un anillo de color sobre
+                # un nodo del MISMO color no se ve: el resaltado tiene que
+                # apagar el resto, no adornar el acierto.
+                color.setAlpha(40)
             pintor.setBrush(color)
 
-            if i == self._elegido:
+            if casa:
+                # Halo claro alrededor del acierto, y el nodo más grande.
+                halo = QColor("#f8fafc")
+                halo.setAlpha(70)
+                pintor.setPen(Qt.NoPen)
+                pintor.setBrush(halo)
+                pintor.drawEllipse(centro, radio + 7, radio + 7)
+                pintor.setBrush(color)
+                pintor.setPen(QPen(QColor("#f8fafc"), 2.0))
+            elif i == self._elegido:
                 pintor.setPen(QPen(QColor("#f1f5f9"), 2.0))
-            elif i in self._resaltados:
-                # El resultado de la búsqueda, con anillo del color de marca.
-                pintor.setPen(QPen(QColor("#3b82f6"), 2.5))
             elif i == self._encima:
                 pintor.setPen(QPen(QColor("#cbd5e1"), 1.5))
             else:
@@ -437,10 +460,21 @@ class Grafo(QWidget):
                 pintor.setPen(
                     QColor("#93c5fd") if i in self._resaltados else QColor("#cbd5e1")
                 )
-                pintor.drawText(
-                    QRectF(centro.x() - 70, centro.y() + radio + 1, 140, 14),
-                    Qt.AlignHCenter | Qt.AlignTop,
+                # `TextSingleLine` y recorte con puntos suspensivos. Sin esto,
+                # Qt intenta meter el nombre en un rectángulo de 140 píxeles
+                # y lo parte por donde puede: un nombre largo sin espacios
+                # acababa escrito **letra por línea**, en vertical.
+                caja = QRectF(centro.x() - 80, centro.y() + radio + 2, 160, 14)
+                metrica = pintor.fontMetrics()
+                texto = metrica.elidedText(
                     str(nodo.get("label") or nodo.get("id") or ""),
+                    Qt.ElideRight,
+                    int(caja.width()),
+                )
+                pintor.drawText(
+                    caja,
+                    Qt.AlignHCenter | Qt.AlignTop | Qt.TextSingleLine,
+                    texto,
                 )
 
     # -- gestos -------------------------------------------------------------

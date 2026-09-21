@@ -99,12 +99,28 @@ _ESTADOS: dict[str, tuple[str, str]] = {
 }
 
 
+#: La paleta en uso. La fija la ventana al arrancar.
+#:
+#: Existe porque hay colores que se eligen **en caliente** —la insignia de
+#: estado cambia en cada fila de la tabla— y el widget que los elige no
+#: recibe la paleta por ningún sitio: las pantallas se construyen con el
+#: motor y nada más. La alternativa era un parámetro nuevo en el constructor
+#: de cada pantalla para un dato que es el mismo en toda la ventana.
+ACTUAL: Paleta = OSCURO
+
+
+def usar(p: Paleta) -> None:
+    """Fija la paleta en uso. La llama la ventana antes de montar nada."""
+    global ACTUAL
+    ACTUAL = p
+
+
 def color_categoria(token: str) -> tuple[str, str]:
     """El par (color, fondo) de una categoría. Lo que no conozca, gris."""
     return CATEGORIA.get(token, CATEGORIA["slate"])
 
 
-def color_estado(p: Paleta, estado: str) -> tuple[str, str]:
+def color_estado(estado: str, p: Paleta | None = None) -> tuple[str, str]:
     """El par (color, fondo) de un estado del motor.
 
     «Borrando» va en gris a propósito, igual que en la web: no es un error
@@ -112,11 +128,12 @@ def color_estado(p: Paleta, estado: str) -> tuple[str, str]:
     y teñir la tabla de rojo por un borrado que el usuario acaba de pedir
     asusta sin motivo.
     """
+    paleta = p or ACTUAL
     if estado in _ESTADOS:
         return _ESTADOS[estado]
     if estado == "deleting":
-        return (p.texto_2, p.terciaria)
-    return (p.texto_3, p.secundaria)
+        return (paleta.texto_2, paleta.terciaria)
+    return (paleta.texto_3, paleta.secundaria)
 
 
 #: Medidas. Las mismas proporciones que la interfaz web.
@@ -315,6 +332,51 @@ def hoja(p: Paleta) -> str:
     QPushButton#icono:hover {{
         background: {p.secundaria};
         border-color: {p.azul};
+    }}
+
+    /* La ficha flotante sobre el lienzo del grafo. Lleva fondo propio y
+       borde porque está **encima** del dibujo: sin ellos, el texto se
+       mezclaría con los nodos y no se leería ninguno de los dos. */
+    #ficha {{
+        background: {p.elevada};
+        border: 1px solid {p.borde_medio};
+        border-radius: 10px;
+    }}
+    #ficha-nombre {{
+        color: {p.texto};
+        font-size: 14px;
+        font-weight: 600;
+    }}
+    #ficha-tipo {{
+        background: {p.azul_suave};
+        border-radius: 5px;
+        color: {p.azul};
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.8px;
+        padding: 3px 8px;
+    }}
+    #ficha-texto {{ color: {p.texto_2}; }}
+    QPushButton#ficha-cerrar {{
+        background: transparent;
+        border: none;
+        border-radius: 12px;
+        color: {p.texto_3};
+        font-size: 13px;
+        padding: 0;
+    }}
+    QPushButton#ficha-cerrar:hover {{
+        background: {p.terciaria};
+        color: {p.texto};
+    }}
+
+    /* El pie del grafo: leyenda y ayuda. Con fondo y un borde arriba para
+       que se lea como pie y no como algo flotando sobre el lienzo. */
+    #pie-grafo {{
+        background: {p.secundaria};
+        border: none;
+        border-top: 1px solid {p.borde};
+        border-radius: 0 0 8px 8px;
     }}
 
     /* --- API ------------------------------------------------------------ */

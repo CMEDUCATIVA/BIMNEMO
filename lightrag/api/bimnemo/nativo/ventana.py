@@ -120,6 +120,9 @@ class Ventana(QMainWindow):
         self.motor = motor
         self.version = version
         self.paleta = tema.OSCURO if oscuro else tema.CLARO
+        # Antes de montar nada: hay piezas que eligen su color en caliente
+        # —las insignias de estado de la tabla de archivos— y lo leen de ahí.
+        tema.usar(self.paleta)
 
         self.setWindowTitle("BIMNEMO — Memoria de conocimiento")
         self.setWindowIcon(QIcon(_marca(64, self.paleta.azul)))
