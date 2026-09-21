@@ -61,9 +61,7 @@ class Hueco(QWidget):
         caja.addWidget(titulo)
 
         aviso = QLabel(
-            "Esta pantalla todavía no está en la ventana nativa.\n"
-            "Mientras tanto está disponible en la interfaz web, que sigue "
-            "funcionando igual."
+            "Esta pantalla todavía no está disponible."
         )
         aviso.setObjectName("descripcion")
         aviso.setWordWrap(True)

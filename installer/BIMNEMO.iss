@@ -412,7 +412,9 @@ end;
 //
 // Son DOS cosas distintas, y esto costó una prueba fallida entenderlo:
 //
-//  1. **La ventana** es un Chromium *del sistema*. Su ejecutable está en
+//  1. **La ventana**, en las versiones hasta la 1.3, es un Chromium *del
+//     sistema* —desde la 1.4 es nativa y vive en `bimnemo.exe`—. Se sigue
+//     cerrando porque quien actualiza viene de una de ésas. Su ejecutable está en
 //     `Program Files`, no en la carpeta de BIMNEMO, así que filtrar por la
 //     ruta del ejecutable no la tocaba: el motor moría y la ventana se
 //     quedaba en pantalla, enseñando la página que ya tenía cargada. Desde

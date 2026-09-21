@@ -428,12 +428,6 @@ WORKSPACE_PATH = "/workspace"
 WEBUI_INDEX_FILENAME = "index.html"
 WORKSPACE_INDEX_FILENAME = "workspace.html"
 
-# Fixed mount path of the BIMNEMO desktop UI. Its own static directory
-# (lightrag/api/bimnemo/ui), not the shared WebUI build: BIMNEMO ships as
-# plain files and needs no Bun toolchain, so it is available whether or not
-# lightrag_webui has ever been built. Additive — nothing above changes.
-BIMNEMO_PATH = "/bimnemo-app"
-
 
 class _RootPathNormalizationMiddleware:
     """Make Mount sub-apps work when the reverse proxy strips the API prefix.
@@ -3319,28 +3313,6 @@ def create_app(args):
             StaticFiles(directory=swagger_static_dir),
             name="swagger-ui-static",
         )
-
-    # BIMNEMO desktop UI. Its own directory, shipped as plain files, so it is
-    # mounted whenever those files are present — independent of whether the
-    # React WebUI build exists. Mounted at BIMNEMO_PATH ("/bimnemo-app"), NOT
-    # at the router's "/bimnemo" prefix: a StaticFiles mount there would
-    # shadow every /bimnemo/* API route.
-    bimnemo_dir = Path(__file__).parent / "bimnemo" / "ui"
-    if (bimnemo_dir / "index.html").is_file():
-        # RevalidatedStaticFiles, no StaticFiles: sin Cache-Control el
-        # navegador decide por su cuenta cuánto guardar cada fichero y una
-        # ventana abierta puede seguir enseñando la versión anterior después
-        # de actualizar. Ver lightrag/api/bimnemo/static.py.
-        from lightrag.api.bimnemo.static import RevalidatedStaticFiles
-
-        app.mount(
-            BIMNEMO_PATH,
-            RevalidatedStaticFiles(directory=bimnemo_dir, html=True, check_dir=True),
-            name="bimnemo",
-        )
-        logger.info(f"BIMNEMO UI mounted at {api_prefix}{BIMNEMO_PATH}/")
-    else:
-        logger.info("BIMNEMO UI assets not found, BIMNEMO route not mounted")
 
     # Conditionally mount each UI entry only if its own entry HTML exists.
     # Both mounts serve the SAME build directory; entry identity is decided

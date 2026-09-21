@@ -10,8 +10,8 @@ parsers) es quien dice si se puede subir.
 Las categorías son ocho y fijas. El panel enseña «N / 8», así que añadir una
 categoría cambia ese denominador: es un cambio de contrato con la vista, no un
 detalle. El color de cada categoría sale de la paleta del Lookbook y se declara
-aquí para que exista una sola fuente: el nombre del token viaja al navegador y
-``ui/css/tokens.css`` lo resuelve.
+aquí para que exista una sola fuente: el nombre del token viaja a la ventana y
+``nativo/tema.py`` lo resuelve.
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ class Category(NamedTuple):
 
     key: str
     label: str
-    icon: str  # nombre del icono Lucide, servido por ui/js/icons.js
-    color: str  # token de color; ui/css/tokens.css lo resuelve a un valor
+    icon: str  # nombre del icono; ``nativo/iconos.py`` lo traduce a Bootstrap
+    color: str  # token de color; ``nativo/tema.py`` lo resuelve a un valor
 
 
 # Orden de declaración = orden de presentación en el panel.

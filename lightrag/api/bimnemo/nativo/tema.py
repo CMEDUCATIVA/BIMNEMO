@@ -1,9 +1,9 @@
 """Los colores de BIMNEMO, para la ventana nativa.
 
-**No hay ningún color inventado aquí.** Todos salen de
-``lightrag/api/bimnemo/ui/css/tokens.css``, que es de donde los toma la
-interfaz web. La ventana nativa y la web tienen que ser el mismo producto, y
-la única forma de que no se separen con el tiempo es que compartan la tabla.
+**Esta es la tabla de colores de BIMNEMO**, y la única. Salió de los
+`tokens.css` de la interfaz web, que ya no existe: ahora la fuente es esto.
+Los nombres se conservan —`texto_2`, `borde_medio`— para que un color se
+pueda seguir de la paleta al widget sin traducir nada.
 
 Se escribe como una hoja de estilo de Qt (`QSS`) generada desde esa tabla y
 no a mano widget por widget: un color a mano es un color que un día se queda

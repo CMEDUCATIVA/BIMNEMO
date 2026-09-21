@@ -2,12 +2,12 @@
 REM ===========================================================================
 REM  BIMNEMO — aplicacion de escritorio
 REM ---------------------------------------------------------------------------
-REM  Arranca el motor y abre BIMNEMO en su propia ventana de Chromium, sin
-REM  barra de direcciones ni pestanas. Al cerrar la ventana se cierra el motor.
+REM  Arranca el motor y abre la ventana de BIMNEMO. Al cerrar la ventana se
+REM  cierra el motor.
 REM
 REM  Opciones (se pasan tal cual al lanzador):
 REM     BIMNEMO.bat --consola      deja ver la salida del motor (diagnostico)
-REM     BIMNEMO.bat --navegador    solo arranca el motor, sin ventana propia
+REM     BIMNEMO.bat --solo-motor   solo arranca el motor, sin ventana
 REM     BIMNEMO.bat --port 9700    otro puerto
 REM ===========================================================================
 

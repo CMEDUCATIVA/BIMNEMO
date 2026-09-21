@@ -1,18 +1,11 @@
 """BIMNEMO como aplicación de escritorio.
 
-Arranca el servidor LightRAG y abre BIMNEMO en una **ventana propia** de
-Chromium, sin barra de direcciones, sin pestañas y con su propio perfil. Para
-quien lo usa es un programa, no una página web; por debajo sigue siendo el
-mismo servidor, así que la API y Swagger siguen disponibles para cualquier
-agente que se conecte.
+Arranca el motor LightRAG y abre la **ventana nativa** de BIMNEMO (Qt). Para
+quien lo usa es un programa; por debajo sigue siendo el mismo servidor, así
+que la API y Swagger siguen disponibles para cualquier agente que se conecte.
 
-Tres decisiones que conviene no deshacer:
+Dos decisiones que conviene no deshacer:
 
-* **Perfil aparte** (``--user-data-dir``). Sin él, Chromium detecta la
-  instancia que el usuario ya tenga abierta, le delega la ventana y termina
-  al instante — y este proceso creería que la aplicación se ha cerrado. El
-  perfil propio también evita que BIMNEMO herede sesiones, extensiones o
-  cookies del navegador personal.
 * **El servidor es un subproceso**, no un hilo. ``lightrag.api.lightrag_server``
   lee ``sys.argv`` al importarse y monta su propio ciclo de vida asíncrono;
   meterlo en este proceso obliga a pelearse con ambas cosas para no ganar nada.
@@ -30,7 +23,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -41,7 +33,6 @@ from lightrag.api.bimnemo.runtime import (
     RESTART_EXIT_CODE,
 )
 
-UI_PATH = "/bimnemo-app/"
 HEALTH_PATH = "/health"
 
 # Cuánto se espera a que el servidor conteste antes de rendirse. La primera
@@ -53,109 +44,6 @@ POLL_SECONDS = 0.4
 def _repo_root() -> Path:
     """Raíz del repositorio, subiendo desde este fichero."""
     return Path(__file__).resolve().parents[3]
-
-
-# ---------------------------------------------------------------------------
-# Localizar Chromium
-# ---------------------------------------------------------------------------
-
-
-def _playwright_builds() -> list[Path]:
-    """Chromium «Chrome for Testing» que Playwright haya dejado en la máquina.
-
-    Va aparte y **al final** de la lista por una razón medida, no por gusto:
-    ese build no sirve como navegador de aplicación. Comprobado en Windows
-    con `chromium-1243`, la ventana `--app` **se queda en blanco** y nunca
-    pinta la página, y encima muestra un cartel fijo que dice que esa versión
-    solo sirve para pruebas automatizadas. Es un binario pensado para
-    conducirse por CDP, que es justo para lo que se descargó aquí.
-    """
-    roots: list[Path] = []
-    playwright_home = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
-    if playwright_home:
-        roots.append(Path(playwright_home))
-    roots.append(Path.home() / "AppData" / "Local" / "ms-playwright")
-
-    builds: list[Path] = []
-    for root in roots:
-        if not root.is_dir():
-            continue
-        # Mayor número de build primero: es la instalación más reciente.
-        versions = sorted(
-            (d for d in root.glob("chromium-*") if d.is_dir()),
-            key=lambda d: d.name,
-            reverse=True,
-        )
-        for version in versions:
-            builds.append(version / "chrome-win64" / "chrome.exe")
-            builds.append(version / "chrome-linux" / "chrome")
-    return builds
-
-
-def is_chrome_for_testing(path: Path) -> bool:
-    """¿Es este binario el build de pruebas de Playwright?"""
-    return "ms-playwright" in str(path).replace("\\", "/").lower()
-
-
-def _candidate_browsers() -> list[Path]:
-    """Chromium candidatos, en el orden en que conviene probarlos.
-
-    1. El que viaje con la aplicación (``chromium/`` junto al repositorio):
-       un despliegue autocontenido no depende de nada instalado.
-    2. Los navegadores del sistema. En Windows **Edge siempre está**, forma
-       parte del sistema operativo, así que este escalón nunca queda vacío.
-    3. El build de pruebas de Playwright, solo como último recurso y
-       avisando — ver :func:`_playwright_builds`.
-    """
-    candidates: list[Path] = []
-
-    bundled_names = ("chrome.exe", "chrome", "chromium.exe", "chromium")
-    bundled_dir = _repo_root() / "chromium"
-    candidates.extend(bundled_dir / name for name in bundled_names)
-
-    program_files = [
-        os.environ.get("PROGRAMFILES", r"C:\Program Files"),
-        os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
-        os.environ.get("LOCALAPPDATA", ""),
-    ]
-    relatives = [
-        r"Google\Chrome\Application\chrome.exe",
-        r"Microsoft\Edge\Application\msedge.exe",
-        r"Chromium\Application\chrome.exe",
-        r"BraveSoftware\Brave-Browser\Application\brave.exe",
-    ]
-    for base in program_files:
-        if not base:
-            continue
-        for relative in relatives:
-            candidates.append(Path(base) / relative)
-
-    candidates.extend(_playwright_builds())
-    return candidates
-
-
-def find_chromium(explicit: str | None = None) -> Path | None:
-    """Devuelve el Chromium a usar, o ``None`` si no hay ninguno."""
-    if explicit:
-        path = Path(explicit)
-        return path if path.is_file() else None
-
-    for candidate in _candidate_browsers():
-        if candidate.is_file():
-            return candidate
-
-    # Última oportunidad: que esté en el PATH (habitual en Linux).
-    for name in ("chromium", "chromium-browser", "google-chrome", "chrome"):
-        found = shutil.which(name)
-        if found:
-            return Path(found)
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Servidor
-# ---------------------------------------------------------------------------
 
 
 def port_is_open(host: str, port: int, timeout: float = 0.5) -> bool:
@@ -284,42 +172,6 @@ def wait_for_server(
 
 
 # ---------------------------------------------------------------------------
-# Ventana
-# ---------------------------------------------------------------------------
-
-
-def _profile_dir() -> Path:
-    """Perfil propio de la aplicación, fuera del repositorio.
-
-    Va en el directorio de datos del usuario y no en el repo para que
-    actualizar o reinstalar BIMNEMO no borre su estado de ventana, y para que
-    el repositorio no acumule un perfil de navegador de cientos de megas.
-    """
-    base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
-    path = Path(base) / "BIMNEMO" / "chromium-profile"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def launch_window(
-    chromium: Path, url: str, *, width: int, height: int
-) -> subprocess.Popen:
-    """Abre la ventana de la aplicación y devuelve su proceso."""
-    args = [
-        str(chromium),
-        f"--app={url}",
-        f"--user-data-dir={_profile_dir()}",
-        f"--window-size={width},{height}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-background-networking",
-        "--disable-component-update",
-        "--disable-features=Translate,OptimizationHints",
-    ]
-    return subprocess.Popen(args)
-
-
-# ---------------------------------------------------------------------------
 # Entrada
 # ---------------------------------------------------------------------------
 
@@ -333,22 +185,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--port", type=int, default=int(os.getenv("BIMNEMO_PORT", "9621"))
     )
-    parser.add_argument("--width", type=int, default=1440)
-    parser.add_argument("--height", type=int, default=900)
-    parser.add_argument(
-        "--chromium",
-        default=os.getenv("BIMNEMO_CHROMIUM"),
-        help="Ruta a un Chromium concreto, si no quieres el que se detecte.",
-    )
     parser.add_argument(
         "--consola",
         action="store_true",
         help="Deja visible la salida del servidor (para diagnosticar).",
     )
     parser.add_argument(
-        "--navegador",
+        "--solo-motor",
+        "--navegador",  # el nombre de antes, para los accesos directos
+        dest="solo_motor",
         action="store_true",
-        help="No abre ventana propia: solo arranca el servidor.",
+        help="Solo arranca el motor, sin ventana: para usarlo desde la API.",
     )
     parser.add_argument(
         "--nativo",
@@ -357,12 +204,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         # directos que lo llevan.
         help=argparse.SUPPRESS,
     )
-    parser.add_argument(
-        "--web",
-        action="store_true",
-        help="Abre la interfaz web antigua en Chromium en vez de la ventana "
-        "nativa (se retirará).",
-    )
+
     return parser.parse_args(argv)
 
 
@@ -491,7 +333,6 @@ def main(argv: list[str] | None = None) -> int:
 
     args = _parse_args(argv)
     base_url = f"http://{args.host}:{args.port}"
-    app_url = f"{base_url}{UI_PATH}"
 
     marcar_en_marcha()
 
@@ -529,8 +370,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print("Motor listo.")
 
-    if args.navegador:
-        print(f"BIMNEMO  {app_url}\nSwagger  {base_url}/docs")
+    if args.solo_motor:
+        print(f"BIMNEMO  {base_url}\nSwagger  {base_url}/docs")
         print("Ctrl+C para detener.")
         try:
             if server is not None:
@@ -541,54 +382,21 @@ def main(argv: list[str] | None = None) -> int:
             _shutdown(server)
         return 0
 
-    if not args.web:
-        # La ventana nativa es la aplicación. La web queda detrás de `--web`
-        # solo mientras se retira.
-        from lightrag.api.bimnemo import nativo
+    from lightrag.api.bimnemo import nativo
 
-        if not nativo.disponible():
-            print(
-                "La ventana nativa necesita Qt (PySide6), que no está en "
-                "este paquete.\nSe abre la de navegador.",
-                file=sys.stderr,
-            )
-        else:
-            return _con_ventana_nativa(nativo, base_url, args, server)
-
-    chromium = find_chromium(args.chromium)
-    if chromium is None:
+    if not nativo.disponible():
+        # Sin Qt no hay ventana. Antes se caía a la interfaz web en Chrome;
+        # ya no existe, así que se dice qué falta en vez de abrir nada.
         print(
-            "No se encontró ningún Chromium para abrir la ventana.\n"
-            f"Abre {app_url} en tu navegador, o vuelve a lanzarlo con\n"
-            "--chromium <ruta a chrome.exe>.",
+            "La ventana de BIMNEMO necesita Qt (PySide6) y no está instalado.\n"
+            "    pip install pyside6-essentials\n"
+            f"El motor sigue en {base_url} para usarlo desde la API.",
             file=sys.stderr,
         )
-        if server is not None:
-            # El motor queda en marcha: la aplicación sigue siendo usable
-            # desde el navegador aunque no haya ventana propia.
-            server.wait()
+        _shutdown(server)
         return 1
 
-    if is_chrome_for_testing(chromium):
-        print(
-            "AVISO: el único Chromium encontrado es el build de pruebas de "
-            "Playwright.\nSu ventana puede quedarse en blanco y muestra un "
-            f"cartel de versión de pruebas.\nSi pasa, abre {app_url} en tu "
-            "navegador o instala Chrome o Edge.",
-            file=sys.stderr,
-        )
-
-    print(f"Abriendo BIMNEMO con {chromium.name} …")
-    window = launch_window(chromium, app_url, width=args.width, height=args.height)
-
-    try:
-        server = supervise(window, server, args.host, args.port, quiet=not args.consola)
-    except KeyboardInterrupt:
-        window.terminate()
-    finally:
-        _shutdown(server)
-
-    return 0
+    return _con_ventana_nativa(nativo, base_url, args, server)
 
 
 # Freno de reinicios: si el motor se cae nada más arrancar varias veces

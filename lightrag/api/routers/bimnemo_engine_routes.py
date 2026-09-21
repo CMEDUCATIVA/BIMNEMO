@@ -18,12 +18,7 @@ from pydantic import BaseModel, Field
 
 from lightrag.api.bimnemo import BIMNEMO_NAME, BIMNEMO_VERSION
 from lightrag.api.bimnemo import pulso
-from lightrag.api.bimnemo.build import (
-    boot_at,
-    boot_id,
-    compute_fingerprint,
-    startup_fingerprint,
-)
+from lightrag.api.bimnemo.build import boot_at, boot_id
 
 from ..utils_api import get_combined_auth_dependency
 
@@ -173,29 +168,16 @@ def create_bimnemo_engine_routes(
     @router.get(
         "/app-build",
         dependencies=[Depends(combined_auth)],
-        summary="Huella de la versión de la interfaz",
+        summary="Qué proceso del motor está contestando",
     )
     async def app_build() -> dict[str, Any]:
-        """Qué versión de la interfaz hay en disco ahora mismo.
+        """La identidad de este proceso del motor.
 
-        La ventana se queda con esta huella al cargar y la vuelve a pedir cada
-        cierto tiempo. Si cambió, es que se actualizó BIMNEMO y lo que se está
-        ejecutando es el código anterior — una página que no se recarga no
-        vuelve a pedir sus módulos, por mucho que el servidor los sirva sin
-        caché.
-
-        Sin esto, el síntoma es indistinguible de un fallo del programa: una
-        lista desactualizada, o un botón que «no aparece».
+        Quien espera a que vuelva el motor tras un reinicio mira esto y no
+        `/health`, porque el proceso moribundo sigue respondiendo un rato: un
+        `boot_id` distinto demuestra que contesta otro proceso.
         """
-        actual = compute_fingerprint()
         return {
-            "fingerprint": actual,
-            "startup_fingerprint": startup_fingerprint(),
-            "changed_since_startup": actual != startup_fingerprint(),
-            # Identidad del proceso, que es otra pregunta: la huella resume
-            # los ficheros en disco y no cambia al reiniciar. Quien espera a
-            # que vuelva el motor mira esto, no `/health`, porque el proceso
-            # moribundo sigue respondiendo un rato.
             "boot_id": boot_id(),
             "boot_at": boot_at(),
         }
