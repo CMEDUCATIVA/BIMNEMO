@@ -248,6 +248,58 @@ def hoja(p: Paleta) -> str:
     QComboBox:focus, QLineEdit:focus {{ border-color: {p.azul}; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
 
+    /* --- API ------------------------------------------------------------ */
+    #ruta, #codigo {{
+        font-family: "Cascadia Mono", Consolas, monospace;
+        color: {p.texto};
+    }}
+    #codigo {{
+        background: {p.secundaria};
+        border-radius: 6px;
+        color: {p.texto_2};
+        padding: 6px 9px;
+    }}
+    QPushButton#copiar-linea {{
+        padding: 3px 12px;
+        font-size: 12px;
+    }}
+    #rotulo-ambito {{
+        color: {p.texto_3};
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding-top: 8px;
+    }}
+
+    /* --- Chat ----------------------------------------------------------- */
+    #conversacion {{
+        background: transparent;
+        border: none;
+    }}
+    QLabel#burbuja {{
+        background: {p.elevada};
+        border: 1px solid {p.borde};
+        border-radius: 12px;
+        color: {p.texto};
+        padding: 12px 14px;
+    }}
+    QLabel#burbuja-mia {{
+        background: {p.azul_suave};
+        border: 1px solid {p.azul};
+        border-radius: 12px;
+        color: {p.texto};
+        padding: 12px 14px;
+    }}
+    QPlainTextEdit#entrada {{
+        background: {p.fondo};
+        border: 1px solid {p.borde_medio};
+        border-radius: {RADIO}px;
+        color: {p.texto};
+        padding: 8px 10px;
+    }}
+    QPlainTextEdit#entrada:focus {{ border-color: {p.azul}; }}
+
     /* --- Tabla de archivos --------------------------------------------- */
     QTableWidget#tabla {{
         background: transparent;
