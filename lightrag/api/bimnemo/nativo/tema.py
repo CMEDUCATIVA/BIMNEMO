@@ -398,11 +398,14 @@ def hoja(p: Paleta) -> str:
         color: {p.texto_3};
         font-size: 11px;
     }}
+    /* El pie del grafo: leyenda y ayuda, dentro de la caja del lienzo.
+       **Sin fondo propio**: con uno, dejaba una banda de otro color y, justo
+       debajo, el margen de la tarjeta parecía una segunda barra. Una línea
+       encima basta para separarlo del dibujo. */
     #pie-grafo {{
-        background: {p.secundaria};
+        background: transparent;
         border: none;
-        border-top: 1px solid {p.borde};
-        border-radius: 0 0 8px 8px;
+        border-top: 1px solid {p.borde_medio};
     }}
 
     /* --- API ------------------------------------------------------------ */

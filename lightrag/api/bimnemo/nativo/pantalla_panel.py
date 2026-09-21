@@ -351,15 +351,16 @@ class PantallaPanel(QWidget):
     # -- columna izquierda: el grafo ----------------------------------------
 
     def _columna_grafo(self) -> QWidget:
-        # Contenedor sin borde, no una `Tarjeta`. Con la tarjeta había **dos**
-        # marcos: el suyo y el de la caja del grafo, y entre los dos quedaba
-        # una franja debajo del pie que parecía una barra suelta.
-        tarjeta = QWidget()
-        tarjeta.setObjectName("fila")
-        columna_tarjeta = QVBoxLayout(tarjeta)
-        columna_tarjeta.setContentsMargins(0, 0, 0, 0)
-        columna_tarjeta.setSpacing(10)
-        tarjeta.anadir = columna_tarjeta.addWidget
+        # La tarjeta con su borde: el grafo es una sección de la pantalla y
+        # tiene que verse como tal.
+        #
+        # Antes esto produjo una franja fea debajo del pie, y por eso la
+        # quité entera — que fue pasarse. La franja no la causaba la
+        # tarjeta, sino que el pie llevaba **fondo propio**: dejaba una
+        # banda de otro color y, debajo, el margen de la tarjeta parecía una
+        # segunda barra. Ahora el pie va sin fondo, solo con una línea
+        # encima, dentro de la caja del lienzo.
+        tarjeta = Tarjeta()
 
         cabecera = QWidget()
         cabecera.setObjectName("fila")
