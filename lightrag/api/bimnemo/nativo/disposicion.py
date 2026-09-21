@@ -36,6 +36,14 @@ DISPOSICIONES = (
     ("radial", "Radial por conexiones", "fija"),
 )
 
+#: Con cuál se abre el grafo.
+#:
+#: «Cerebro» y no «Fuerzas» aunque por debajo sean lo mismo: las dos colocan
+#: los nodos con la misma física, así que no se pierde ninguna información
+#: por empezar con la silueta puesta. Y para una memoria de conocimiento es
+#: la primera imagen que tiene sentido.
+POR_DEFECTO = "cerebro"
+
 _CLASE = {clave: clase for clave, _rotulo, clase in DISPOSICIONES}
 
 
@@ -186,4 +194,4 @@ def aplicar(clave: str, nodos: list[dict], pos: np.ndarray) -> bool:
     return True
 
 
-__all__ = ["DISPOSICIONES", "aplicar", "es_simulacion"]
+__all__ = ["DISPOSICIONES", "POR_DEFECTO", "aplicar", "es_simulacion"]

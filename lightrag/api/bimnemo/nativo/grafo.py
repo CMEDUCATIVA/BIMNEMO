@@ -126,7 +126,7 @@ class Grafo(QWidget):
         self._con_rotulo: set[int] = set()
         self._grados: np.ndarray = np.zeros(0)
         self._tipos: list[tuple[str, int, QColor]] = []
-        self._disposicion = "fuerzas"
+        self._disposicion = disposicion.POR_DEFECTO
         self._resaltados: set[int] = set()
         self._vecinos: set[int] = set()
         self._encuadre_pendiente = False

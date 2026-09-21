@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from lightrag.api.bimnemo.nativo import iconos
-from lightrag.api.bimnemo.nativo.disposicion import DISPOSICIONES
+from lightrag.api.bimnemo.nativo.disposicion import DISPOSICIONES, POR_DEFECTO
 from lightrag.api.bimnemo.nativo import formato
 from lightrag.api.bimnemo.nativo.grafo import Grafo
 from lightrag.api.bimnemo.nativo.motor import Motor
@@ -521,6 +521,11 @@ class PantallaPanel(QWidget):
         self.disposicion = QComboBox()
         for clave, rotulo, _clase in DISPOSICIONES:
             self.disposicion.addItem(rotulo, clave)
+        # El selector arranca en la misma que el lienzo: si no, enseñaría
+        # «Fuerzas» mientras el grafo ya está dibujando el cerebro.
+        self.disposicion.setCurrentIndex(
+            [c for c, _r, _k in DISPOSICIONES].index(POR_DEFECTO)
+        )
         self.disposicion.currentIndexChanged.connect(
             lambda: self.grafo.disponer(self.disposicion.currentData())
         )
@@ -619,6 +624,33 @@ class PantallaPanel(QWidget):
             )
 
     # -- datos --------------------------------------------------------------
+
+    def otra_memoria(self) -> None:
+        """Se ha abierto otra memoria: el panel empieza de cero.
+
+        La entidad de partida y lo que hubiera escrito en «buscar» eran de la
+        memoria anterior, **y una entidad de aquella no tiene por qué existir
+        en esta**: dejar el selector puesto pide el grafo de algo que ya no
+        está, y vuelve vacío. Es lo mismo que hace la web, que reinicia el
+        grafo al cambiar de memoria.
+
+        Las cifras se vacían a la vez. Abrir una memoria dormida tarda unos
+        segundos, y dejar las de la anterior mientras tanto es enseñar datos
+        de otra memoria como si fueran de esta.
+        """
+        self.entidad.blockSignals(True)
+        self.entidad.clear()
+        self.entidad.addItem("Todo el grafo", "*")
+        self.entidad.blockSignals(False)
+
+        self.busqueda.blockSignals(True)
+        self.busqueda.clear()
+        self.busqueda.blockSignals(False)
+
+        for cifra in self.cifras.values():
+            cifra.poner("…", "")
+        self.grafo.poner([], [])
+        self.resumen_grafo.setText("Cargando…")
 
     def retematizar(self) -> None:
         """El lienzo del grafo se pinta a mano: hay que pedirle que repinte."""
