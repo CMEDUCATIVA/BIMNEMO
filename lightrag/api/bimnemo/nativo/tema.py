@@ -482,6 +482,48 @@ def hoja(p: Paleta) -> str:
     }}
 
     /* --- API ------------------------------------------------------------ */
+    /* Las solapas Guía · Swagger · ReDoc: una tira con la activa hundida. */
+    #pestanas {{
+        background: {p.secundaria};
+        border: 1px solid {p.borde};
+        border-radius: {RADIO}px;
+    }}
+    QPushButton#pestana {{
+        background: transparent;
+        border: none;
+        border-radius: 6px;
+        color: {p.texto_3};
+        font-weight: 600;
+        padding: 5px 14px;
+    }}
+    QPushButton#pestana:hover {{ color: {p.texto}; }}
+    QPushButton#pestana:checked {{
+        background: {p.elevada};
+        color: {p.azul};
+    }}
+
+    /* Cada endpoint, en su propia banda dentro del panel. */
+    #endpoint {{
+        background: {p.secundaria};
+        border: 1px solid {p.borde};
+        border-radius: 8px;
+    }}
+
+    /* El interruptor de la clave: una palanca, no una casilla. */
+    QPushButton#interruptor {{
+        background: {p.terciaria};
+        border: 1px solid {p.borde_medio};
+        border-radius: 12px;
+        text-align: left;
+        padding-left: 3px;
+    }}
+    QPushButton#interruptor:checked {{
+        background: {p.azul};
+        border-color: {p.azul};
+        text-align: right;
+        padding-left: 0;
+        padding-right: 3px;
+    }}
     #ruta, #codigo {{
         font-family: "Cascadia Mono", Consolas, monospace;
         color: {p.texto};
@@ -664,30 +706,7 @@ def hoja(p: Paleta) -> str:
         text-align: left;
     }}
 
-    /* --- Panel: memorias, categorías y tipos ---------------------------- */
-    /* Una fila de la tabla de memorias. Es un botón —se pulsa para abrir esa
-       memoria— pero no lo parece hasta que el ratón pasa por encima: en una
-       tabla, un borde por fila son diez bordes. */
-    QPushButton#fila-memoria {{
-        background: transparent;
-        border: 1px solid transparent;
-        border-radius: {RADIO}px;
-        text-align: left;
-    }}
-    QPushButton#fila-memoria:hover {{ background: {p.secundaria}; }}
-    QPushButton#fila-memoria:checked {{
-        background: {p.azul_suave};
-        border-color: {p.azul_borde};
-    }}
-    #nombre-memoria {{ color: {p.texto}; font-weight: 600; }}
-    QPushButton#fila-memoria:checked #nombre-memoria {{ color: {p.azul}; }}
-    #cabecera-columna {{
-        color: {p.texto_3};
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 0.6px;
-    }}
-
+    /* --- Panel: categorías y tipos -------------------------------------- */
     QPushButton#tarjeta-categoria {{
         background: {p.fondo};
         border: 1px solid {p.borde};
