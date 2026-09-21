@@ -154,11 +154,13 @@ class Ventana(QMainWindow):
         propios widgets de Qt: importarlas todas al cargar el módulo alarga
         el arranque por pantallas que quizá no se abran nunca.
         """
+        from lightrag.api.bimnemo.nativo.pantalla_archivos import PantallaArchivos
         from lightrag.api.bimnemo.nativo.pantalla_configuracion import (
             PantallaConfiguracion,
         )
         from lightrag.api.bimnemo.nativo.pantalla_motor import PantallaMotor
 
+        self.registrar_pantalla("Archivos", PantallaArchivos(self.motor))
         self.registrar_pantalla("Motor", PantallaMotor(self.motor))
         self.registrar_pantalla(
             "Configuración IA", PantallaConfiguracion(self.motor)

@@ -243,6 +243,44 @@ def hoja(p: Paleta) -> str:
     QComboBox:focus, QLineEdit:focus {{ border-color: {p.azul}; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
 
+    /* --- Tabla de archivos --------------------------------------------- */
+    QTableWidget#tabla {{
+        background: transparent;
+        border: none;
+        gridline-color: transparent;
+    }}
+    /* Poco relleno vertical a propósito: Qt se lo **descuenta** al widget
+       que va dentro de una celda. Con 8 px arriba y abajo, el botón de
+       borrar recibía 13 px de alto, no cabía y Qt lo dejaba invisible. El
+       alto de fila se fija desde el código, que es donde se ve. */
+    QTableWidget#tabla::item {{
+        border-bottom: 1px solid {p.borde};
+        padding: 2px 6px;
+    }}
+    QTableWidget#tabla::item:selected {{
+        background: {p.azul_suave};
+        color: {p.texto};
+    }}
+    QPushButton#borrar-fila {{
+        background: transparent;
+        border: 1px solid {p.borde_medio};
+        color: {p.texto_2};
+        padding: 2px 10px;
+    }}
+    QPushButton#borrar-fila:hover {{
+        border-color: #dc2626;
+        color: #ef4444;
+    }}
+    QHeaderView::section {{
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid {p.borde_medio};
+        color: {p.texto_3};
+        font-weight: 600;
+        padding: 6px;
+        text-align: left;
+    }}
+
     QScrollBar:vertical {{
         background: transparent; width: 10px; margin: 0;
     }}

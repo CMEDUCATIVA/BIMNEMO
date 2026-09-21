@@ -17,6 +17,7 @@ se cierra sola, sin rastro, en el ordenador de otro.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import QByteArray, QObject, QUrl, Signal
@@ -69,6 +70,75 @@ class Motor(QObject):
         mal: Optional[Callable[[str], None]] = None,
     ) -> None:
         self._lanzar("POST", ruta, cuerpo, bien, mal)
+
+    def borrar(
+        self,
+        ruta: str,
+        cuerpo: Any,
+        bien: Callable[[Any], None],
+        mal: Optional[Callable[[str], None]] = None,
+    ) -> None:
+        """DELETE con cuerpo, que es lo que piden los endpoints de borrado."""
+        peticion = self._peticion(ruta)
+        datos = QByteArray(json.dumps(cuerpo or {}).encode("utf-8"))
+        respuesta = self._red.sendCustomRequest(peticion, b"DELETE", datos)
+        respuesta.finished.connect(
+            lambda: self._recoger(respuesta, ruta, bien, mal)
+        )
+
+    def subir(
+        self,
+        ruta: str,
+        fichero: str,
+        bien: Callable[[Any], None],
+        mal: Optional[Callable[[str], None]] = None,
+        avance: Optional[Callable[[int, int], None]] = None,
+    ) -> None:
+        """Sube un fichero como `multipart/form-data`, informando del avance.
+
+        El fichero se lee **según se envía**, no entero a memoria: hay
+        documentos de cientos de megas y cargarlos enteros para subirlos a
+        `127.0.0.1` sería gastar el doble por nada.
+        """
+        from PySide6.QtCore import QFile
+        from PySide6.QtNetwork import QHttpMultiPart, QHttpPart
+
+        multi = QHttpMultiPart(QHttpMultiPart.FormDataType)
+
+        parte = QHttpPart()
+        nombre = Path(fichero).name
+        parte.setHeader(
+            QNetworkRequest.ContentDispositionHeader,
+            f'form-data; name="file"; filename="{nombre}"',
+        )
+
+        # El `QFile` se cuelga del multipart a propósito: Qt lo va leyendo
+        # mientras sube, y si lo recogiera el recolector de basura antes de
+        # terminar la subida se cortaría a mitad sin decir por qué.
+        origen = QFile(fichero)
+        if not origen.open(QFile.ReadOnly):
+            if mal:
+                mal(f"No se pudo leer {nombre}.")
+            return
+        origen.setParent(multi)
+        parte.setBodyDevice(origen)
+        multi.append(parte)
+
+        peticion = QNetworkRequest(QUrl(f"{self.base}{ruta}"))
+        # Sin cabecera de tipo: la pone el propio multipart, con su frontera.
+        peticion.setTransferTimeout(0)  # sin plazo: un fichero grande tarda
+        if self._clave:
+            peticion.setRawHeader(b"X-API-Key", self._clave.encode("utf-8"))
+
+        respuesta = self._red.post(peticion, multi)
+        multi.setParent(respuesta)
+        if avance is not None:
+            respuesta.uploadProgress.connect(
+                lambda hecho, total: avance(int(hecho), int(total))
+            )
+        respuesta.finished.connect(
+            lambda: self._recoger(respuesta, ruta, bien, mal)
+        )
 
     def _peticion(self, ruta: str) -> QNetworkRequest:
         peticion = QNetworkRequest(QUrl(f"{self.base}{ruta}"))
