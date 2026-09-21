@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QProgressBar,
@@ -81,6 +82,17 @@ SECCIONES = (
 #: se queda como está.
 CLAVE_PUESTA = "•••••••••••• (guardada)"
 
+#: El dato del elemento «Otro modelo…» del selector.
+#:
+#: El selector de modelo **no se puede escribir**: un desplegable en el que
+#: además se teclea no se lee como un selector, y el texto a medio escribir
+#: acababa guardado como nombre de modelo. Pero hay modelos que no están en
+#: el catálogo —el que cada uno se baja en Ollama, o los proveedores que no
+#: traen lista, como LocalAI—, y a esos se llega por aquí: abre un cuadro,
+#: se escribe el nombre exacto y queda en la lista.
+OTRO_MODELO = "__otro__"
+SIN_MODELO = "— sin modelo —"
+
 
 class Seccion(QWidget):
     """El formulario de un proveedor: catálogo, modelo, dirección y clave."""
@@ -106,7 +118,10 @@ class Seccion(QWidget):
         self._fila("Proveedor", self.proveedor)
 
         self.modelo = QComboBox()
-        self.modelo.setEditable(True)  # se puede escribir uno que no esté
+        # `activated` y no `currentIndexChanged`: solo lo que elige una
+        # persona. Rehacer la lista también cambia el índice.
+        self.modelo.activated.connect(self._modelo_elegido)
+        self._modelo_anterior = ""
         self._fila("Modelo", self.modelo)
 
         self.host = QLineEdit()
@@ -159,9 +174,9 @@ class Seccion(QWidget):
             self.proveedor.blockSignals(True)
             self.proveedor.setCurrentIndex(indice)
             self.proveedor.blockSignals(False)
-            self._poner_modelos(self._elegido())
-
-        self.modelo.setCurrentText(valores.get("model") or "")
+            self._poner_modelos(self._elegido(), valores.get("model") or "")
+        else:
+            self._elegir_modelo(valores.get("model") or "")
         self.host.setText(valores.get("host") or "")
 
         self._tenia_clave = bool(valores.get("api_key_set"))
@@ -186,16 +201,68 @@ class Seccion(QWidget):
         # lo que evita el error más común: dejar la dirección del proveedor
         # anterior y no entender por qué falla todo.
         self.host.setText(elegido.get("host") or "")
-        self._poner_modelos(elegido)
+        # Con otro proveedor, su primer modelo. Conservar el de antes dejaba
+        # «gpt-4o» elegido para Gemini, que no lo tiene.
+        modelos = elegido.get("models") or []
+        self._poner_modelos(elegido, modelos[0] if modelos else "")
         self._pintar_pista()
 
-    def _poner_modelos(self, proveedor: Optional[dict[str, Any]]) -> None:
-        actual = self.modelo.currentText()
+    def _poner_modelos(
+        self, proveedor: Optional[dict[str, Any]], elegir: Optional[str] = None
+    ) -> None:
+        """Los modelos del catálogo y, al final, «Otro modelo…».
+
+        ``elegir`` es el que queda marcado; sin él, el que ya lo estaba. Se
+        dice aquí y no después para no añadir a la lista nueva, de paso, el
+        modelo de la anterior.
+        """
+        actual = self.modelo_actual() if elegir is None else elegir
+        self.modelo.blockSignals(True)
         self.modelo.clear()
         for m in (proveedor or {}).get("models") or []:
-            self.modelo.addItem(m)
-        if actual:
-            self.modelo.setCurrentText(actual)
+            self.modelo.addItem(m, m)
+        if self.modelo.count():
+            self.modelo.insertSeparator(self.modelo.count())
+        self.modelo.addItem("Otro modelo…", OTRO_MODELO)
+        self.modelo.blockSignals(False)
+        self._elegir_modelo(actual)
+
+    def modelo_actual(self) -> str:
+        """El nombre del modelo elegido; vacío si no hay ninguno."""
+        dato = self.modelo.currentData()
+        return "" if dato in (None, OTRO_MODELO) else str(dato)
+
+    def _elegir_modelo(self, nombre: str) -> None:
+        """Deja marcado ese modelo, añadiéndolo si no está en la lista.
+
+        Un modelo guardado que no está en el catálogo —uno propio, o uno que
+        el catálogo ya no ofrece— se añade tal cual y se deja marcado.
+        Elegir otro en su lugar lo cambiaría en el siguiente «Guardar» sin
+        que nadie lo hubiera pedido. Por lo mismo, sin modelo guardado se
+        enseña «— sin modelo —» y no el primero de la lista: el reordenado,
+        por ejemplo, se puede dejar en blanco.
+        """
+        nombre = (nombre or "").strip()
+        indice = self.modelo.findData(nombre)
+        if indice < 0:
+            self.modelo.insertItem(0, nombre or SIN_MODELO, nombre)
+            indice = 0
+        self.modelo.setCurrentIndex(indice)
+        self._modelo_anterior = nombre
+
+    def _modelo_elegido(self, indice: int) -> None:
+        if self.modelo.itemData(indice) != OTRO_MODELO:
+            self._modelo_anterior = self.modelo_actual()
+            return
+        texto, aceptado = QInputDialog.getText(
+            self,
+            "Otro modelo",
+            "Nombre exacto del modelo, tal como lo da el proveedor:",
+        )
+        # Cancelar deja el que había, no «Otro modelo…» marcado.
+        self._elegir_modelo(
+            texto.strip() if aceptado and texto.strip() else self._modelo_anterior
+        )
 
     def _pintar_pista(self) -> None:
         elegido = self._elegido() or {}
@@ -220,7 +287,7 @@ class Seccion(QWidget):
         datos: dict[str, Any] = {
             "provider": self.proveedor.currentData() or "",
             "binding": elegido.get("binding") or "",
-            "model": self.modelo.currentText().strip(),
+            "model": self.modelo_actual(),
             "host": self.host.text().strip(),
         }
         escrita = self.api_key.text().strip()

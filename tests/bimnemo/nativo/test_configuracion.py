@@ -110,3 +110,94 @@ def test_en_ventana_estrecha_van_de_una_en_una(configuracion, ventana):
     ventana.hide()
 
     assert posiciones == [(0, 0), (1, 0), (2, 0), (3, 0)]
+
+
+# -- el selector de modelo --------------------------------------------------
+
+CATALOGO_LLM = [
+    {"key": "openai", "label": "OpenAI", "binding": "openai",
+     "host": "https://api.openai.com/v1", "models": ["gpt-5.4-mini", "gpt-5.4"]},
+    {"key": "gemini", "label": "Gemini", "binding": "gemini",
+     "host": "https://generativelanguage.googleapis.com", "models": ["gemini-2.5-flash"]},
+    {"key": "localai", "label": "LocalAI", "binding": "openai",
+     "host": "http://localhost:8080/v1", "models": []},
+]
+
+
+def _seccion():
+    from lightrag.api.bimnemo.nativo.pantalla_configuracion import Seccion
+
+    seccion = Seccion("llm", "Modelo de lenguaje", "")
+    seccion.poner_catalogo(CATALOGO_LLM)
+    return seccion
+
+
+def test_el_modelo_es_un_selector_y_no_se_escribe(aplicacion):
+    seccion = _seccion()
+    seccion.poner_valores({"provider": "openai", "model": "gpt-5.4"})
+
+    assert seccion.modelo.isEditable() is False
+    assert seccion.modelo_actual() == "gpt-5.4"
+    textos = [seccion.modelo.itemText(i) for i in range(seccion.modelo.count())]
+    assert textos[-1] == "Otro modelo…"
+
+
+def test_un_modelo_guardado_que_no_esta_en_la_lista_no_se_pierde(aplicacion):
+    """Cambiarlo por otro lo cambiaría en el siguiente «Guardar»."""
+    seccion = _seccion()
+    seccion.poner_valores({"provider": "openai", "model": "gpt-5.6-luna"})
+
+    assert seccion.modelo_actual() == "gpt-5.6-luna"
+    assert seccion.a_peticion()["model"] == "gpt-5.6-luna"
+
+
+def test_otro_modelo_pregunta_el_nombre_y_lo_deja_elegido(aplicacion, monkeypatch):
+    from lightrag.api.bimnemo.nativo import pantalla_configuracion as modulo
+
+    seccion = _seccion()
+    seccion.poner_valores({"provider": "localai", "model": ""})
+    monkeypatch.setattr(
+        modulo.QInputDialog, "getText", lambda *a, **k: ("mi-modelo:7b", True)
+    )
+    seccion._modelo_elegido(seccion.modelo.findData(modulo.OTRO_MODELO))
+
+    assert seccion.modelo_actual() == "mi-modelo:7b"
+
+
+def test_cancelar_otro_modelo_deja_el_que_habia(aplicacion, monkeypatch):
+    from lightrag.api.bimnemo.nativo import pantalla_configuracion as modulo
+
+    seccion = _seccion()
+    seccion.poner_valores({"provider": "openai", "model": "gpt-5.4"})
+    monkeypatch.setattr(modulo.QInputDialog, "getText", lambda *a, **k: ("", False))
+    seccion._modelo_elegido(seccion.modelo.findData(modulo.OTRO_MODELO))
+
+    assert seccion.modelo_actual() == "gpt-5.4"
+
+
+def test_sin_modelo_se_queda_en_blanco_y_no_elige_el_primero(aplicacion):
+    """El reordenado se puede dejar en blanco: no se rellena por su cuenta."""
+    seccion = _seccion()
+    seccion.poner_valores({"provider": "openai", "model": ""})
+
+    assert seccion.modelo_actual() == ""
+    assert seccion.a_peticion()["model"] == ""
+
+
+def test_al_cambiar_de_proveedor_no_arrastra_el_modelo_anterior(aplicacion):
+    seccion = _seccion()
+    seccion.poner_valores({"provider": "openai", "model": "gpt-5.4"})
+    seccion.proveedor.setCurrentIndex(seccion.proveedor.findData("gemini"))
+
+    textos = [seccion.modelo.itemText(i) for i in range(seccion.modelo.count())]
+    assert seccion.modelo_actual() == "gemini-2.5-flash"
+    assert "gpt-5.4" not in textos
+
+
+def test_el_idioma_de_una_instalacion_nueva_es_el_espanol():
+    """El `.env` de una instalación nueva sale de `env.example`."""
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parents[3]
+    lineas = (raiz / "env.example").read_text(encoding="utf-8").splitlines()
+    assert "SUMMARY_LANGUAGE=Spanish" in lineas
