@@ -138,6 +138,14 @@ def color_estado(estado: str, p: Paleta | None = None) -> tuple[str, str]:
 
 #: Medidas. Las mismas proporciones que la interfaz web.
 ANCHO_LATERAL = 232
+
+#: Ancho del carril cuando solo caben los iconos.
+ANCHO_LATERAL_ESTRECHO = 60
+
+#: Por debajo de este ancho de ventana, el carril se queda en iconos. Es el
+#: punto en el que el contenido empieza a apretarse de verdad: con el carril
+#: de 232 píxeles, una ventana de 1.100 deja menos de 870 para lo que importa.
+ANCHO_VENTANA_CARRIL_ESTRECHO = 1180
 ALTO_BARRA = 56
 RADIO = 8
 
@@ -209,6 +217,16 @@ def hoja(p: Paleta) -> str:
     QPushButton#nav:hover {{
         background: {p.secundaria};
         color: {p.texto};
+    }}
+    /* Carril estrecho: el botón queda cuadrado, con el icono centrado y
+       sin sitio que reservar para un rótulo que ya no está. */
+    QPushButton#nav[estrecho="si"] {{
+        padding: 9px 0;
+        text-align: center;
+    }}
+    QLabel#nav-cuenta[estrecho="si"] {{
+        font-size: 9px;
+        padding: 0;
     }}
     QPushButton#nav:checked {{
         background: {p.azul_suave};

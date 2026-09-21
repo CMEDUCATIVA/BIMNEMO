@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 
 from lightrag.api.bimnemo.nativo import iconos
 from lightrag.api.bimnemo.nativo.disposicion import DISPOSICIONES
-from lightrag.api.bimnemo.nativo import formato, tema
+from lightrag.api.bimnemo.nativo import formato
 from lightrag.api.bimnemo.nativo.grafo import Grafo
 from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo.piezas import Aviso, Fluida, Tarjeta
@@ -53,8 +53,18 @@ ANCHO_MINIMO_DOS_COLUMNAS = 1120
 #: le robaba sitio al lienzo.
 ANCHO_DATOS = 296
 
-PROFUNDIDADES = ((1, "1 salto"), (2, "2 saltos"), (3, "3 saltos"),
-                 (4, "4 saltos"), (5, "5 saltos"))
+#: Alto de la banda de tarjetas cuando van apiladas debajo del grafo. Es su
+#: alto natural más el aire: repartirse el alto con el grafo dejaría el
+#: lienzo por la mitad, y apilado la primera sección **es** el grafo.
+ALTO_CIFRAS_APILADAS = 116
+
+PROFUNDIDADES = (
+    (1, "1 salto"),
+    (2, "2 saltos"),
+    (3, "3 saltos"),
+    (4, "4 saltos"),
+    (5, "5 saltos"),
+)
 TOPES = (100, 250, 500, 1000)
 TOPE_POR_DEFECTO = 250
 
@@ -170,9 +180,7 @@ class Ficha(QFrame):
         self.descripcion.setVisible(bool(trozos))
 
         documentos = _partes(nodo.get("file_path"))
-        self.origen.setText(
-            "De: " + "\nY de: ".join(documentos) if documentos else ""
-        )
+        self.origen.setText("De: " + "\nY de: ".join(documentos) if documentos else "")
         self.origen.setVisible(bool(documentos))
 
         self.recolocar()
@@ -333,12 +341,21 @@ class PantallaPanel(QWidget):
             # Apiladas, las tarjetas se reparten a lo ancho en vez de
             # estirarse una debajo de otra.
             self._repartir_cifras(4)
+            # Y **no se quedan con alto del grafo**: apilado, la primera
+            # sección es el grafo, que es a lo que se viene. Las tarjetas
+            # toman su alto natural y el grafo se queda con el resto.
+            self.columna_datos.setFixedHeight(ALTO_CIFRAS_APILADAS)
+            self.rejilla.setRowStretch(0, 1)
+            self.rejilla.setRowStretch(1, 0)
         else:
             self.rejilla.addWidget(self.columna_grafo, 0, 0)
             self.rejilla.addWidget(self.columna_datos, 0, 1)
             self.rejilla.setColumnStretch(0, 1)
             self.rejilla.setColumnStretch(1, 0)
             self.columna_datos.setFixedWidth(ANCHO_DATOS)
+            self.columna_datos.setMaximumHeight(16777215)
+            self.rejilla.setRowStretch(0, 1)
+            self.rejilla.setRowStretch(1, 0)
             self._repartir_cifras(1)
 
         self.columna_grafo.show()
@@ -590,11 +607,16 @@ class PantallaPanel(QWidget):
             )
 
         filas = (len(CIFRAS) - 1) // columnas + 1
+        # En una sola columna las tarjetas reparten el alto de la columna
+        # lateral; repartidas a lo ancho, no — ahí mandan su alto natural.
+        estirar = columnas == 1
         for fila in range(5):
             # Todas las filas con el mismo peso: las tarjetas salen del mismo
             # alto y reparten entre ellas toda la columna, en vez de quedarse
             # arriba con un hueco debajo.
-            self.rejilla_cifras.setRowStretch(fila, 1 if fila < filas else 0)
+            self.rejilla_cifras.setRowStretch(
+                fila, 1 if (estirar and fila < filas) else 0
+            )
 
     # -- datos --------------------------------------------------------------
 
@@ -617,8 +639,7 @@ class PantallaPanel(QWidget):
 
         self.cifras["memoria"].poner(
             formato.numero(memoria.get("total_documents")),
-            f"{formato.numero(memoria.get('total_chunks'))} fragmentos "
-            "indexados",
+            f"{formato.numero(memoria.get('total_chunks'))} fragmentos indexados",
         )
 
         fallo = memoria.get("documents_error") or memoria.get("failed_reason")
@@ -733,9 +754,7 @@ class PantallaPanel(QWidget):
         """
         if self.entidad.currentData() != "*" or self.entidad.count() > 1:
             return
-        mejores = sorted(
-            nodos, key=lambda n: -int(n.get("degree") or 0)
-        )[:120]
+        mejores = sorted(nodos, key=lambda n: -int(n.get("degree") or 0))[:120]
         self.entidad.blockSignals(True)
         for n in mejores:
             nombre = str(n.get("label") or n.get("id") or "")
@@ -752,8 +771,7 @@ class PantallaPanel(QWidget):
             etiqueta.setText("Buscar entidad")
         else:
             etiqueta.setText(
-                f"Buscar entidad · {cuantas} encontrada"
-                + ("s" if cuantas != 1 else "")
+                f"Buscar entidad · {cuantas} encontrada" + ("s" if cuantas != 1 else "")
             )
 
     def _pintar_detalle(self, nodo: Optional[dict]) -> None:
