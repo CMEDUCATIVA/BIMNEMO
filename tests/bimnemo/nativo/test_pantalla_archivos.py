@@ -288,6 +288,32 @@ def test_filtrar_deja_solo_su_categoria_y_lo_dice_en_la_pista(pantalla):
     assert "1 de 3" in pantalla.pista.text()
 
 
+# --- Contador del carril ---------------------------------------------------
+
+
+def test_avisa_de_cuantos_ficheros_hay(pantalla):
+    """El carril enseña ese número junto a «Archivos»."""
+    visto: list[int] = []
+    pantalla.cuenta.connect(visto.append)
+
+    pantalla._recibir({"files": FICHEROS["files"][:2], "total": 2})
+    assert visto == [2]
+
+    # Mismo número: no se vuelve a avisar.
+    pantalla._recibir({"files": FICHEROS["files"][:2], "total": 2})
+    assert visto == [2]
+
+
+def test_el_contador_es_el_total_y_no_lo_que_deja_ver_el_filtro(pantalla):
+    """Filtrar cambia la tabla, no cuántos ficheros hay en la memoria."""
+    visto: list[int] = []
+    pantalla.cuenta.connect(visto.append)
+
+    pantalla.filtros._elegir("presentation")
+    assert pantalla.tabla.rowCount() == 1
+    assert visto == []
+
+
 def test_si_la_categoria_elegida_desaparece_se_vuelve_a_todas(pantalla):
     """Dejar la tabla filtrada por algo que ya no existe la deja en blanco."""
     pantalla.filtros._elegir("presentation")

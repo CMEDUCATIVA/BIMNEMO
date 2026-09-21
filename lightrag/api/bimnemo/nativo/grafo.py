@@ -116,6 +116,7 @@ class Grafo(QWidget):
         self._disposicion = "fuerzas"
         self._resaltados: set[int] = set()
         self._vecinos: set[int] = set()
+        self._encuadre_pendiente = False
 
         self._alpha = 0.0
         self._vista = [0.0, 0.0, 1.0]  # desplazamiento x, y, y escala
@@ -166,6 +167,7 @@ class Grafo(QWidget):
         self._encima = None
         self._resaltados = set()
         self._vecinos = set()
+        self._encuadre_pendiente = True
         self._colocar()
         self.update()
 
@@ -217,6 +219,13 @@ class Grafo(QWidget):
     def _paso(self) -> None:
         if not len(self._pos) or self._alpha < ALPHA_MIN:
             self._reloj.stop()
+            # Encuadrar **al terminar**, no al empezar. Al cargar, los nodos
+            # están todavía amontonados en la espiral de partida: encuadrar
+            # ahí daba un zoom pegadísimo, y cuando el grafo se abría ya
+            # nadie lo recolocaba.
+            if self._encuadre_pendiente:
+                self._encuadre_pendiente = False
+                self.encuadrar()
             return
 
         pos = self._pos
@@ -471,27 +480,48 @@ class Grafo(QWidget):
                 pintor.setPen(Qt.NoPen)
             pintor.drawEllipse(centro, radio, radio)
 
-            rotular = i in self._con_rotulo or i in self._resaltados
-            if rotular and k > 0.35:
-                pintor.setPen(
-                    QColor("#93c5fd") if i in self._resaltados else QColor("#cbd5e1")
+        # Los rótulos, en una **segunda pasada**. Dibujados dentro del bucle
+        # de nodos, el nodo siguiente —y sobre todo su halo de búsqueda, que
+        # es más ancho que él— pintaba encima del nombre del anterior: desde
+        # fuera, nombres cortados por la mitad. Todo el texto va después de
+        # todos los círculos.
+        for i, nodo in enumerate(self._nodos):
+            if k <= 0.35:
+                break
+            if i not in self._con_rotulo and i not in self._resaltados:
+                continue
+            if aislando and i not in self._vecinos:
+                continue
+
+            centro = self._a_pantalla(self._pos[i])
+            radio = self._radio[i] * k
+            caja = QRectF(centro.x() - 80, centro.y() + radio + 2, 160, 14)
+            texto = pintor.fontMetrics().elidedText(
+                str(nodo.get("label") or nodo.get("id") or ""),
+                Qt.ElideRight,
+                int(caja.width()),
+            )
+
+            if i in self._resaltados:
+                # Fondo detrás del nombre del acierto: sobre una maraña de
+                # aristas, el texto claro solo no se lee.
+                ancho = pintor.fontMetrics().horizontalAdvance(texto) + 8
+                fondo = QRectF(
+                    centro.x() - ancho / 2, caja.top() - 1, ancho, 15
                 )
-                # `TextSingleLine` y recorte con puntos suspensivos. Sin esto,
-                # Qt intenta meter el nombre en un rectángulo de 140 píxeles
-                # y lo parte por donde puede: un nombre largo sin espacios
-                # acababa escrito **letra por línea**, en vertical.
-                caja = QRectF(centro.x() - 80, centro.y() + radio + 2, 160, 14)
-                metrica = pintor.fontMetrics()
-                texto = metrica.elidedText(
-                    str(nodo.get("label") or nodo.get("id") or ""),
-                    Qt.ElideRight,
-                    int(caja.width()),
-                )
-                pintor.drawText(
-                    caja,
-                    Qt.AlignHCenter | Qt.AlignTop | Qt.TextSingleLine,
-                    texto,
-                )
+                pintor.setPen(Qt.NoPen)
+                pintor.setBrush(QColor(2, 6, 23, 210))
+                pintor.drawRoundedRect(fondo, 3, 3)
+                pintor.setPen(QColor("#bfdbfe"))
+            else:
+                pintor.setPen(QColor("#cbd5e1"))
+
+            pintor.setBrush(Qt.NoBrush)
+            pintor.drawText(
+                caja,
+                Qt.AlignHCenter | Qt.AlignTop | Qt.TextSingleLine,
+                texto,
+            )
 
     # -- gestos -------------------------------------------------------------
 

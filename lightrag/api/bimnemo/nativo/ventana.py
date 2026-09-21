@@ -7,8 +7,6 @@ tema; las pantallas llegan en las etapas siguientes y se enchufan en
 
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (

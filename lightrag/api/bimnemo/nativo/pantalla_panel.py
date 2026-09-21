@@ -218,6 +218,10 @@ class Cifra(QFrame):
         columna = QVBoxLayout(self)
         columna.setContentsMargins(16, 14, 16, 14)
         columna.setSpacing(2)
+        # Centrado vertical: las tarjetas se reparten el alto de la columna,
+        # así que sin esto el rótulo se pega arriba y la nota abajo, con un
+        # agujero de cien píxeles en medio.
+        columna.addStretch(1)
 
         cabecera = QWidget()
         cabecera.setObjectName("fila")
@@ -242,6 +246,7 @@ class Cifra(QFrame):
         self.nota.setObjectName("cifra-nota")
         self.nota.setWordWrap(True)
         columna.addWidget(self.nota)
+        columna.addStretch(1)
 
     def poner(self, valor: str, nota: str = "") -> None:
         self.valor.setText(valor)
@@ -346,7 +351,15 @@ class PantallaPanel(QWidget):
     # -- columna izquierda: el grafo ----------------------------------------
 
     def _columna_grafo(self) -> QWidget:
-        tarjeta = Tarjeta()
+        # Contenedor sin borde, no una `Tarjeta`. Con la tarjeta había **dos**
+        # marcos: el suyo y el de la caja del grafo, y entre los dos quedaba
+        # una franja debajo del pie que parecía una barra suelta.
+        tarjeta = QWidget()
+        tarjeta.setObjectName("fila")
+        columna_tarjeta = QVBoxLayout(tarjeta)
+        columna_tarjeta.setContentsMargins(0, 0, 0, 0)
+        columna_tarjeta.setSpacing(10)
+        tarjeta.anadir = columna_tarjeta.addWidget
 
         cabecera = QWidget()
         cabecera.setObjectName("fila")
@@ -514,6 +527,10 @@ class PantallaPanel(QWidget):
         envoltorio.setFrameShape(QFrame.NoFrame)
         envoltorio.setObjectName("conversacion")
         envoltorio.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Sin barra vertical: las cuatro tarjetas caben siempre porque se
+        # reparten el alto. Con ella, aparecía y desaparecía al redimensionar
+        # y movía el contenido de sitio.
+        envoltorio.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         dentro = QWidget()
         dentro.setObjectName("fila")
@@ -554,11 +571,13 @@ class PantallaPanel(QWidget):
             self.rejilla_cifras.setColumnStretch(
                 columna, 1 if columna < columnas else 0
             )
-        # Sin esto, apiladas, la última fila se estira hasta el borde y deja
-        # tarjetas de trescientos píxeles de alto.
-        self.rejilla_cifras.setRowStretch(
-            (len(CIFRAS) - 1) // columnas + 1, 1
-        )
+
+        filas = (len(CIFRAS) - 1) // columnas + 1
+        for fila in range(5):
+            # Todas las filas con el mismo peso: las tarjetas salen del mismo
+            # alto y reparten entre ellas toda la columna, en vez de quedarse
+            # arriba con un hueco debajo.
+            self.rejilla_cifras.setRowStretch(fila, 1 if fila < filas else 0)
 
     # -- datos --------------------------------------------------------------
 
