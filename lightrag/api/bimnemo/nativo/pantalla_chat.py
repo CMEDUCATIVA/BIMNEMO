@@ -19,11 +19,8 @@ from typing import Any, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -31,18 +28,8 @@ from PySide6.QtWidgets import (
 )
 
 from lightrag.api.bimnemo.nativo.motor import Motor
-from lightrag.api.bimnemo.nativo.piezas import Aviso, Tarjeta
-
-#: Los modos de consulta, con la explicación del manifiesto para que quien
-#: elige sepa qué está eligiendo.
-MODOS = (
-    ("mix", "Grafo + vectores (recomendado)"),
-    ("hybrid", "Combina local y global"),
-    ("local", "Entidades concretas y su contexto"),
-    ("global", "Relaciones y temas amplios"),
-    ("naive", "Solo búsqueda vectorial, sin grafo"),
-)
-
+from lightrag.api.bimnemo.nativo import chat_piezas
+from lightrag.api.bimnemo.nativo.piezas import Aviso
 
 class Burbuja(QWidget):
     """Un mensaje de la conversación.
@@ -93,27 +80,30 @@ class PantallaChat(QWidget):
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(32, 28, 32, 20)
-        raiz.setSpacing(14)
+        raiz.setSpacing(12)
 
         titulo = QLabel("Chat")
         titulo.setObjectName("titulo")
         raiz.addWidget(titulo)
 
-        descripcion = QLabel(
-            "Pregúntale a esta memoria. Responde con lo que hay en tus "
-            "documentos y dice de cuáles lo ha sacado."
-        )
-        descripcion.setObjectName("descripcion")
-        descripcion.setWordWrap(True)
-        raiz.addWidget(descripcion)
-
         self.aviso = Aviso()
         raiz.addWidget(self.aviso)
 
-        raiz.addWidget(self._conversacion(), 1)
-        raiz.addWidget(self._redaccion())
+        # La barra de la web: Buscar en · Modo · Devolver, y Limpiar.
+        self.barra = chat_piezas.Barra()
+        self.barra.limpiar.connect(self.limpiar)
+        raiz.addWidget(self.barra)
 
-        self._saludar()
+        raiz.addWidget(self._conversacion(), 1)
+
+        self.compositor = chat_piezas.Compositor()
+        self.compositor.enviar.connect(self.preguntar)
+        raiz.addWidget(self.compositor)
+
+        self._vacio = chat_piezas.Vacio()
+        self.hilo.insertWidget(self.hilo.count() - 1, self._vacio)
+
+        self.motor.get("/bimnemo/nemos", self._poner_memorias, None)
 
     # -- estructura ---------------------------------------------------------
 
@@ -132,60 +122,19 @@ class PantallaChat(QWidget):
         self.area.setWidget(dentro)
         return self.area
 
-    def _redaccion(self) -> QWidget:
-        tarjeta = Tarjeta()
+    def _poner_memorias(self, datos: Any) -> None:
+        if isinstance(datos, dict):
+            self.barra.poner_memorias(datos.get("nemos") or [])
 
-        fila = QWidget()
-        fila.setObjectName("fila")
-        caja = QHBoxLayout(fila)
-        caja.setContentsMargins(0, 0, 0, 0)
-        caja.setSpacing(10)
-
-        caja.addWidget(QLabel("Modo"))
-        self.modo = QComboBox()
-        for clave, rotulo in MODOS:
-            self.modo.addItem(rotulo, clave)
-        caja.addWidget(self.modo, 1)
-
-        self.tiempo = QLabel("")
-        self.tiempo.setObjectName("descripcion")
-        caja.addWidget(self.tiempo)
-        tarjeta.anadir(fila)
-
-        abajo = QWidget()
-        abajo.setObjectName("fila")
-        caja2 = QHBoxLayout(abajo)
-        caja2.setContentsMargins(0, 0, 0, 0)
-        caja2.setSpacing(10)
-
-        self.entrada = QPlainTextEdit()
-        self.entrada.setObjectName("entrada")
-        self.entrada.setPlaceholderText(
-            "Escribe tu pregunta…   (Ctrl+Intro para enviar)"
-        )
-        self.entrada.setFixedHeight(76)
-        caja2.addWidget(self.entrada, 1)
-
-        self.boton = QPushButton("Preguntar")
-        self.boton.setObjectName("principal")
-        self.boton.setCursor(Qt.PointingHandCursor)
-        self.boton.setFixedHeight(76)
-        self.boton.clicked.connect(self.preguntar)
-        caja2.addWidget(self.boton)
-
-        tarjeta.anadir(abajo)
-        return tarjeta
-
-    def keyPressEvent(self, evento) -> None:  # noqa: N802 (nombre de Qt)
-        # Intro a secas hace salto de línea: una pregunta larga es normal y
-        # perderla por pulsar Intro sin querer es de las cosas que más
-        # molestan de un chat.
-        if evento.key() in (Qt.Key_Return, Qt.Key_Enter) and (
-            evento.modifiers() & Qt.ControlModifier
-        ):
-            self.preguntar()
-            return
-        super().keyPressEvent(evento)
+    def limpiar(self) -> None:
+        """Vacía la conversación y deja el cartel de bienvenida."""
+        while self.hilo.count() > 1:
+            pieza = self.hilo.takeAt(0)
+            if pieza.widget():
+                pieza.widget().deleteLater()
+        self._vacio = chat_piezas.Vacio()
+        self.hilo.insertWidget(self.hilo.count() - 1, self._vacio)
+        self.aviso.callar()
 
     # -- conversación -------------------------------------------------------
 
@@ -198,41 +147,89 @@ class PantallaChat(QWidget):
         barra.setValue(barra.maximum())
         return burbuja
 
-    def _saludar(self) -> None:
-        self._decir(
-            "Pregúntame lo que quieras sobre tus documentos.\n\n"
-            "Por ejemplo: «¿qué acuerdos se tomaron?», «¿quién es "
-            "responsable de qué?», «¿qué plazos hay?»."
-        )
-
     def preguntar(self) -> None:
-        pregunta = self.entrada.toPlainText().strip()
+        pregunta = self.compositor.texto()
         if not pregunta or self._esperando:
             return
 
-        self.entrada.clear()
+        self.compositor.vaciar()
+        if self._vacio is not None:
+            self._vacio.deleteLater()
+            self._vacio = None
+
         self._decir(pregunta, mio=True)
         self._esperando = True
-        self.boton.setEnabled(False)
-        self.tiempo.setText("Pensando…")
-        self._pensando = self._decir("…")
+        self.compositor.boton.setEnabled(False)
+        self._pensando = self._decir("Pensando…")
 
-        self.motor.post(
-            "/query",
-            {"query": pregunta, "mode": self.modo.currentData()},
-            self._respondio,
-            self._no_pudo,
+        ruta = self._ruta()
+        cuerpo: dict[str, Any] = {
+            "query": pregunta,
+            "mode": self.barra.modo.currentData(),
+        }
+        self.motor.post(ruta, cuerpo, self._respondio, self._no_pudo)
+
+    def _ruta(self) -> str:
+        """La ruta que toca, según «Buscar en» y «Devolver».
+
+        Son cuatro combinaciones y **cada una tiene su endpoint**; no es que
+        una valga para todo con un parámetro. Preguntar a todas las memorias
+        no es lo mismo que preguntar a una: el motor tiene que recorrerlas y
+        decir de cuál sale cada dato.
+
+        Las rutas se escriben enteras y no se dejan al reescritor de
+        `Motor`, que apunta a la memoria **activa de la aplicación**: aquí
+        manda el selector del chat, que puede ser otra.
+        """
+        from urllib.parse import quote
+
+        solo_contexto = self.barra.solo_contexto
+
+        if self.barra.en_todas:
+            return (
+                "/bimnemo/memory/search-all"
+                if solo_contexto
+                else "/bimnemo/memory/ask-all"
+            )
+
+        nemo = self.barra.nemo
+        if not nemo:
+            # **La memoria por defecto tiene el identificador vacío**: es el
+            # espacio sin nombre de LightRAG. Con la ruta espejo salía
+            # `/nemo//query`, que no existe. La suya es la ruta normal.
+            return (
+                "/bimnemo/memory/search" if solo_contexto else "/query"
+            )
+
+        nombre = quote(nemo, safe="")
+        return (
+            f"/nemo/{nombre}/memory/search"
+            if solo_contexto
+            else f"/nemo/{nombre}/query"
         )
 
     def _respondio(self, datos: Any) -> None:
         self._esperando = False
-        self.boton.setEnabled(True)
+        self.compositor.boton.setEnabled(True)
 
         if not isinstance(datos, dict):
             self._pensando.cuerpo.setText("El motor devolvió algo que no entiendo.")
             return
 
-        texto = str(datos.get("response") or "").strip() or "Sin respuesta."
+        # Con «Solo contexto recuperado» no hay respuesta redactada: lo que
+        # vuelve es lo que el motor encontró, y hay que enseñarlo tal cual.
+        texto = str(datos.get("response") or "").strip()
+        if not texto:
+            contexto = datos.get("context") or datos.get("results")
+            if contexto:
+                import json
+
+                texto = (
+                    "**Contexto recuperado** (sin redactar):\n\n```json\n"
+                    + json.dumps(contexto, ensure_ascii=False, indent=2)[:4000]
+                    + "\n```"
+                )
+        texto = texto or "Sin respuesta."
 
         # El modelo suele citar él mismo, con marcas `[1]` y su propia lista
         # de referencias al final. Cuando lo hace, añadir otra línea con los
@@ -259,13 +256,15 @@ class PantallaChat(QWidget):
             # Importa decirlo: no lo escribió el modelo, salió de la caché o
             # de un camino de respaldo.
             partes.append("sin generar (caché o respaldo)")
-        self.tiempo.setText("  ·  ".join(partes))
+        if partes:
+            self.aviso.informar("  ·  ".join(partes))
+        else:
+            self.aviso.callar()
 
         barra = self.area.verticalScrollBar()
         barra.setValue(barra.maximum())
 
     def _no_pudo(self, motivo: str) -> None:
         self._esperando = False
-        self.boton.setEnabled(True)
-        self.tiempo.setText("")
+        self.compositor.boton.setEnabled(True)
         self._pensando.cuerpo.setText(f"No he podido responder: {motivo}")

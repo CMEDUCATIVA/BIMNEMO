@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from lightrag.api.bimnemo.nativo import iconos
+
 
 @dataclass(frozen=True)
 class Paleta:
@@ -22,6 +24,8 @@ class Paleta:
     azul: str
     azul_hover: str
     azul_suave: str
+    #: El borde del recuadro de la memoria activa, en la barra.
+    azul_borde: str
 
     fondo: str
     elevada: str
@@ -43,6 +47,7 @@ CLARO = Paleta(
     azul="#2563eb",
     azul_hover="#1d4ed8",
     azul_suave="rgba(37, 99, 235, 0.10)",
+    azul_borde="rgba(37, 99, 235, 0.22)",
     fondo="#ffffff",
     elevada="#f8fafc",
     secundaria="#f1f5f9",
@@ -58,6 +63,7 @@ OSCURO = Paleta(
     azul="#3b82f6",
     azul_hover="#60a5fa",
     azul_suave="rgba(59, 130, 246, 0.16)",
+    azul_borde="rgba(59, 130, 246, 0.34)",
     fondo="#020617",
     elevada="#0f172a",
     secundaria="#1e293b",
@@ -191,6 +197,29 @@ def hoja(p: Paleta) -> str:
         font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 1px;
+    }}
+
+    /* La memoria abierta y sus tres acciones van en un recuadro: es un
+       grupo, no cuatro controles sueltos que se hubieran quedado juntos.
+       El tinte azul lo separa de la marca sin subir el volumen. */
+    #grupo-nemo {{
+        background: {p.azul_suave};
+        border: 1px solid {p.azul_borde};
+        border-radius: 10px;
+    }}
+    /* Dentro del recuadro los botones no llevan borde propio: ya están
+       contenidos, y con él el grupo parecía tres cajas dentro de otra. */
+    #grupo-nemo QPushButton#icono {{
+        background: transparent;
+        border-color: transparent;
+    }}
+    #grupo-nemo QPushButton#icono:hover {{ background: {p.secundaria}; }}
+    #grupo-nemo QPushButton#icono:disabled {{ border-color: transparent; }}
+    /* El nombre de la memoria, en negrita: es el dato que manda sobre todo
+       lo que se ve debajo. */
+    #grupo-nemo QComboBox {{
+        background: {p.fondo};
+        font-weight: 600;
     }}
 
     /* --- Navegación lateral -------------------------------------------- */
@@ -337,7 +366,15 @@ def hoja(p: Paleta) -> str:
         color: {p.texto};
     }}
     QComboBox:focus, QLineEdit:focus {{ border-color: {p.azul}; }}
-    QComboBox::drop-down {{ border: none; width: 22px; }}
+    QComboBox::drop-down {{ border: none; width: 26px; }}
+    /* La flecha, con su fichero: en una hoja de Qt una imagen se pide con
+       `url(...)`, y sin ella Qt no dibuja ninguna. Un desplegable sin
+       flecha no se lee como un desplegable — parece una caja de texto. */
+    QComboBox::down-arrow {{
+        image: url({iconos.ruta_pintada("desplegar", 11, p.texto_3)});
+        height: 11px;
+        width: 11px;
+    }}
 
     /* --- Panel y barra del grafo ---------------------------------------- */
     #rotulo-campo {{
@@ -469,6 +506,27 @@ def hoja(p: Paleta) -> str:
     }}
 
     /* --- Chat ----------------------------------------------------------- */
+    /* La barra de arriba: una tira con su fondo, como en la web. */
+    #chat-barra {{
+        background: {p.elevada};
+        border: 1px solid {p.borde};
+        border-radius: 10px;
+    }}
+    #chat-compositor {{
+        background: transparent;
+        border: none;
+    }}
+    /* Botón discreto, para acciones que no son la principal. */
+    QPushButton#fantasma {{
+        background: transparent;
+        border: 1px solid {p.borde_medio};
+        color: {p.texto_2};
+        padding: 6px 12px;
+    }}
+    QPushButton#fantasma:hover {{
+        background: {p.secundaria};
+        color: {p.texto};
+    }}
     #conversacion {{
         background: transparent;
         border: none;
@@ -604,6 +662,58 @@ def hoja(p: Paleta) -> str:
         font-weight: 600;
         padding: 6px;
         text-align: left;
+    }}
+
+    /* --- Panel: memorias, categorías y tipos ---------------------------- */
+    /* Una fila de la tabla de memorias. Es un botón —se pulsa para abrir esa
+       memoria— pero no lo parece hasta que el ratón pasa por encima: en una
+       tabla, un borde por fila son diez bordes. */
+    QPushButton#fila-memoria {{
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: {RADIO}px;
+        text-align: left;
+    }}
+    QPushButton#fila-memoria:hover {{ background: {p.secundaria}; }}
+    QPushButton#fila-memoria:checked {{
+        background: {p.azul_suave};
+        border-color: {p.azul_borde};
+    }}
+    #nombre-memoria {{ color: {p.texto}; font-weight: 600; }}
+    QPushButton#fila-memoria:checked #nombre-memoria {{ color: {p.azul}; }}
+    #cabecera-columna {{
+        color: {p.texto_3};
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.6px;
+    }}
+
+    QPushButton#tarjeta-categoria {{
+        background: {p.fondo};
+        border: 1px solid {p.borde};
+        border-radius: 10px;
+        padding: 0;
+        text-align: left;
+    }}
+    QPushButton#tarjeta-categoria:hover {{ border-color: {p.azul}; }}
+    /* Vacía: se apaga, no desaparece. El catálogo entero dice lo que
+       BIMNEMO sabe clasificar, y eso también informa. */
+    QPushButton#tarjeta-categoria[vacia="si"] {{ background: transparent; }}
+    QPushButton#tarjeta-categoria[vacia="si"] #nombre-categoria,
+    QPushButton#tarjeta-categoria[vacia="si"] #cifra-categoria {{
+        color: {p.texto_3};
+    }}
+    #nombre-categoria {{ color: {p.texto}; font-weight: 600; }}
+    #cifra-categoria {{ color: {p.texto}; font-size: 20px; font-weight: 600; }}
+    /* La extensión, en monoespaciada y con su cajita: es un código, no una
+       palabra. */
+    #extension {{
+        background: {p.secundaria};
+        border-radius: 5px;
+        color: {p.texto_2};
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 11px;
+        padding: 2px 0;
     }}
 
     /* --- Diálogos ------------------------------------------------------- */
