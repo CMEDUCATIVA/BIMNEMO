@@ -1,4 +1,4 @@
-; ===========================================================================
+﻿; ===========================================================================
 ;  BIMNEMO — instalador de Windows (Inno Setup 6)
 ; ---------------------------------------------------------------------------
 ;  Se compila con:
@@ -8,10 +8,13 @@
 ;
 ;  ## Dos decisiones que conviene entender
 ;
-;  **Se instala en la carpeta del usuario, no en Program Files.** BIMNEMO se
-;  actualiza a sí mismo reescribiendo sus propios ficheros; en Program Files
-;  eso exige permisos de administrador en cada actualización, y pedirle eso a
-;  alguien cada semana acaba en «actualizar más tarde» para siempre.
+;  **Se instala en los Programas del usuario, no en Program Files.** Es
+;  `%LOCALAPPDATA%\Programs\BIMNEMO`, la carpeta que Windows reserva para los
+;  programas de un solo usuario —la misma que usan VS Code o Discord—, y se
+;  puede cambiar en la pantalla de destino. BIMNEMO se actualiza a sí mismo
+;  reescribiendo sus propios ficheros; en Program Files eso exige permisos de
+;  administrador en cada actualización, y pedirle eso a alguien cada semana
+;  acaba en «actualizar más tarde» para siempre.
 ;
 ;  **Al desinstalar NO se borran los datos.** Las memorias, los documentos y
 ;  la configuración del usuario se quedan. Un desinstalador que se lleva por
@@ -145,7 +148,7 @@ Type: filesandordirs; Name: "{app}\__pycache__"
 Type: files; Name: "{app}\lightrag.log"
 
 [Messages]
-es.WelcomeLabel2=Esto instalará [name/ver] en tu ordenador.%n%nBIMNEMO es una memoria de conocimiento que funciona en tu máquina: tus documentos no salen de ella.%n%nSe instalará en tu carpeta personal para poder actualizarse solo, sin pedirte permisos de administrador cada vez.
+es.WelcomeLabel2=Esto instalará [name/ver] en tu ordenador.%n%nBIMNEMO es una memoria de conocimiento que funciona en tu máquina: tus documentos no salen de ella.%n%nSe instalará en tus programas de usuario —puedes elegir otra carpeta en el siguiente paso— para poder actualizarse solo, sin pedirte permisos de administrador cada vez.
 
 [Code]
 
@@ -211,9 +214,37 @@ begin
   Result := DirExists(ExpandConstant('{app}\.git'));
 end;
 
+// Mismo criterio que `HayInstalacionEn`, más abajo; está aquí porque Pascal
+// exige declarar antes de usar.
+function HayInstalacionEnDisco(carpeta: String): Boolean;
+begin
+  Result := (carpeta <> '') and
+            (FileExists(AddBackslash(carpeta) + 'unins000.exe') or
+             FileExists(AddBackslash(carpeta) + 'VERSION'));
+end;
+
+// Donde se instala si no había nada: los Programas del usuario.
 function CarpetaPorDefecto(): String;
 begin
+  Result := ExpandConstant('{userpf}\BIMNEMO');
+end;
+
+// Donde se instalaba hasta la 1.4. Se sigue mirando al buscar una instalación
+// anterior: es donde tienen hoy sus memorias y sus documentos todos los que
+// actualizan, y no verla los dejaría con dos BIMNEMO y los datos en el viejo.
+function CarpetaAntigua(): String;
+begin
   Result := ExpandConstant('{localappdata}\BIMNEMO');
+end;
+
+// La carpeta con un BIMNEMO dentro entre las dos de siempre, o vacía.
+function CarpetaConocida(): String;
+begin
+  Result := '';
+  if HayInstalacionEnDisco(CarpetaPorDefecto()) then
+    Result := CarpetaPorDefecto()
+  else if HayInstalacionEnDisco(CarpetaAntigua()) then
+    Result := CarpetaAntigua();
 end;
 
 function DirPropuesto(Valor: String): String;
@@ -258,12 +289,12 @@ begin
   desinstalador := DesinstaladorPrevio();
   carpeta := LeerPrevio('Inno Setup: App Path');
 
-  // Sin entrada en el registro, preguntarle al disco por la carpeta donde
-  // BIMNEMO se instala siempre.
+  // Sin entrada en el registro, preguntarle al disco por las carpetas donde
+  // BIMNEMO se instala: la de ahora y la de antes de la 1.4.
   if desinstalador = '' then
   begin
-    carpeta := CarpetaPorDefecto();
-    if not HayInstalacionEn(carpeta) then
+    carpeta := CarpetaConocida();
+    if carpeta = '' then
       Exit;
     if FileExists(AddBackslash(carpeta) + 'unins000.exe') then
       desinstalador := AddBackslash(carpeta) + 'unins000.exe';
@@ -377,8 +408,8 @@ end;
 function CarpetaDeLaInstalacion(): String;
 begin
   Result := LeerPrevio('Inno Setup: App Path');
-  if (Result = '') and HayInstalacionEn(CarpetaPorDefecto()) then
-    Result := CarpetaPorDefecto();
+  if Result = '' then
+    Result := CarpetaConocida();
 end;
 
 // En WQL la barra invertida es el carácter de escape, así que hay que
