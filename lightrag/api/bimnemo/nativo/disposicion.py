@@ -28,6 +28,9 @@ SEPARACION_ANILLO = 54.0
 DISPOSICIONES = (
     ("fuerzas", "Fuerzas", "sim"),
     ("atlas", "Force Atlas", "sim"),
+    # Fuerzas otra vez, pero contenidas en una silueta de cerebro. Es de
+    # simulación a propósito: los nodos los coloca la física, no la forma.
+    ("cerebro", "Cerebro", "sim"),
     ("circular", "Circular", "fija"),
     ("tipos", "Círculos por tipo", "fija"),
     ("radial", "Radial por conexiones", "fija"),

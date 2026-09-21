@@ -38,7 +38,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
-from lightrag.api.bimnemo.nativo import disposicion, tema
+from lightrag.api.bimnemo.nativo import disposicion, silueta, tema
 
 # --- Constantes de la simulación, copiadas de `grafo-lienzo.js` -------------
 
@@ -295,6 +295,10 @@ class Grafo(QWidget):
         # Gravedad hacia el centro.
         fuerza -= pos * GRAVITY
 
+        # Y, si toca, el contorno devolviendo dentro a los que se salen.
+        if self._disposicion == "cerebro":
+            fuerza += silueta.contener(pos, silueta.escala_para(len(pos)))
+
         self._vel = (self._vel + fuerza) * DAMPING
         paso = self._vel * self._alpha
         # Tope por eje: sin esto, un nodo aislado con mucha repulsión sale
@@ -462,6 +466,9 @@ class Grafo(QWidget):
 
         k = self._vista[2]
 
+        if self._disposicion == "cerebro":
+            self._pintar_silueta(pintor, k)
+
         # Con un nodo elegido, sus relaciones se ven y el resto se apaga:
         # eso es «aislar». Sin apagar nada, elegir no sirve de nada en un
         # grafo de doscientas entidades.
@@ -571,6 +578,38 @@ class Grafo(QWidget):
                 Qt.AlignHCenter | Qt.AlignTop | Qt.TextSingleLine,
                 texto,
             )
+
+    def _pintar_silueta(self, pintor: QPainter, k: float) -> None:
+        """El contorno del cerebro, detrás de todo.
+
+        Sin dibujarlo, la forma solo se adivina por dónde no hay nodos: con
+        entidades sueltas o pocas relaciones no se reconoce nada. El trazo
+        es tenue a propósito — es el recipiente, no el contenido.
+        """
+        escala = silueta.escala_para(len(self._pos))
+
+        forma = QPainterPath()
+        for cx, cy, rx, ry in silueta.PIEZAS:
+            centro = self._a_pantalla(np.array([cx * escala, cy * escala]))
+            pieza = QPainterPath()
+            pieza.addEllipse(centro, rx * escala * k, ry * escala * k)
+            forma = forma.united(pieza)
+
+        # `simplified` deja el contorno de la unión y quita las costuras de
+        # donde unas elipses se meten dentro de otras.
+        forma = forma.simplified()
+
+        relleno = QColor(tema.ACTUAL.azul)
+        relleno.setAlpha(14)
+        pintor.setPen(Qt.NoPen)
+        pintor.setBrush(relleno)
+        pintor.drawPath(forma)
+
+        trazo = QColor(tema.ACTUAL.azul)
+        trazo.setAlpha(70)
+        pintor.setPen(QPen(trazo, max(1.0, 1.4 * k)))
+        pintor.setBrush(Qt.NoBrush)
+        pintor.drawPath(forma)
 
     # -- gestos -------------------------------------------------------------
 
