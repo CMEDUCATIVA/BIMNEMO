@@ -198,6 +198,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Solo arranca el motor, sin ventana: para usarlo desde la API.",
     )
     parser.add_argument(
+        "--esperar-pid",
+        type=int,
+        default=0,
+        # Lo usa la propia aplicación al relanzarse tras actualizarse.
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--nativo",
         action="store_true",
         # Ya es lo normal. Se sigue aceptando para no romper los accesos
@@ -327,11 +334,49 @@ def _relanzar_como_bimnemo(argv: list[str]) -> bool:
     return True
 
 
+#: Cuánto espera una copia relanzada a que la anterior termine de cerrarse.
+ESPERA_RELANZADO_SEGUNDOS = 60.0
+
+
+def esperar_a_que_termine(pid: int, segundos: float = ESPERA_RELANZADO_SEGUNDOS) -> None:
+    """Espera a que termine el proceso ``pid``, o a que pase el plazo.
+
+    Existe para relanzarse después de actualizar. La copia vieja se está
+    cerrando mientras la nueva arranca: si la nueva no esperase, encontraría
+    el puerto ocupado por el motor viejo, se engancharía a él como «otra
+    ventana» —sin supervisor— y ese motor moriría en cuanto la vieja
+    terminase de cerrar, dejando la ventana nueva sin nada detrás.
+    """
+    if pid <= 0:
+        return
+    if os.name == "nt":
+        import ctypes
+
+        SINCRONIZAR = 0x00100000
+        manija = ctypes.windll.kernel32.OpenProcess(SINCRONIZAR, False, pid)
+        if not manija:
+            return  # ya no existe
+        try:
+            ctypes.windll.kernel32.WaitForSingleObject(manija, int(segundos * 1000))
+        finally:
+            ctypes.windll.kernel32.CloseHandle(manija)
+        return
+
+    fin = time.monotonic() + segundos
+    while time.monotonic() < fin:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        time.sleep(0.2)
+
+
 def main(argv: list[str] | None = None) -> int:
     if _relanzar_como_bimnemo(list(sys.argv[1:] if argv is None else argv)):
         return 0
 
     args = _parse_args(argv)
+    esperar_a_que_termine(args.esperar_pid)
     base_url = f"http://{args.host}:{args.port}"
 
     marcar_en_marcha()

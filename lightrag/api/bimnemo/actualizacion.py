@@ -174,7 +174,7 @@ def _estado_release(forzar: bool = False) -> dict[str, Any]:
         "strategy": "release",
         "installed": instalada,
         "latest": etiqueta,
-        "behind": bool(etiqueta and etiqueta != instalada),
+        "behind": paquete.es_mas_nueva(etiqueta, instalada),
         # Un cliente no edita el código, así que no hay cambios locales que
         # respetar. Y si los hubiera, el despliegue los sobrescribe sin más:
         # avisar de algo que el usuario no ha hecho sería ruido.
@@ -270,12 +270,23 @@ def aplicar(descartar_cambios: bool = False) -> dict[str, Any]:
 
 
 def instalar_dependencias() -> tuple[bool, str]:
-    """``pip install -e .[api]``, solo cuando cambió ``pyproject.toml``."""
+    """``pip install -e .[api,escritorio]``, solo si cambió ``pyproject.toml``.
+
+    Con ``escritorio``: sin él, una versión que necesitara otra versión de Qt
+    actualizaría el motor y dejaría la ventana con la de antes.
+    """
     from lightrag.api.bimnemo import paquete
 
     try:
         proc = subprocess.run(
-            [paquete.python_del_entorno(raiz()), "-m", "pip", "install", "-e", ".[api]"],
+            [
+                paquete.python_del_entorno(raiz()),
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                ".[api,escritorio]",
+            ],
             cwd=str(raiz()),
             capture_output=True,
             text=True,

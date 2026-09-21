@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from lightrag.api.bimnemo.nativo import iconos, tema
+from lightrag.api.bimnemo.nativo.actualizar import BotonActualizar
 from lightrag.api.bimnemo.nativo.memorias import Memorias
 from lightrag.api.bimnemo.nativo.motor import PIDE_CLAVE, Motor
 from lightrag.api.bimnemo.nativo.piezas import insignia, pintar_insignia
@@ -133,6 +134,10 @@ class BarraSuperior(QFrame):
         fila = QHBoxLayout(caja_exterior)
         fila.setContentsMargins(0, 0, 0, 0)
         fila.setSpacing(10)
+
+        # Escondido hasta que haya una versión nueva; entonces parpadea.
+        self.boton_actualizar = BotonActualizar()
+        fila.addWidget(self.boton_actualizar, 0, Qt.AlignVCenter)
 
         self.estado_motor = insignia(
             "Comprobando…", tema.ACTUAL.texto_3, tema.ACTUAL.secundaria, punto=True

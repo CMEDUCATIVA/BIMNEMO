@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lightrag.api.bimnemo.nativo import formato, iconos, tema
+from lightrag.api.bimnemo.nativo import actualizar, formato, iconos, tema
 from lightrag.api.bimnemo.nativo.barra import BarraSuperior
 from lightrag.api.bimnemo.nativo.bienvenida import Bienvenida
 from lightrag.api.bimnemo.nativo.memorias import Memorias, ajustes
@@ -141,6 +141,12 @@ class Ventana(QMainWindow):
         self.bienvenida.terminada.connect(self.refrescar_todo)
         self.bienvenida.comprobar()
 
+        # Y siempre: si hay una versión nueva en GitHub, se dice arriba.
+        self.vigia = actualizar.Vigia(motor, self)
+        self.vigia.disponible.connect(self.barra.boton_actualizar.mostrar)
+        self.barra.boton_actualizar.clicked.connect(self._actualizar)
+        self.vigia.arrancar()
+
     # -- lo que vale para toda la ventana -----------------------------------
 
     def refrescar_todo(self) -> None:
@@ -157,6 +163,9 @@ class Ventana(QMainWindow):
             if callable(releer):
                 releer()
         self.barra.comprobar_motor()
+
+    def _actualizar(self) -> None:
+        actualizar.DialogoActualizar(self.motor, self.vigia.estado, self).exec()
 
     def _otra_memoria(self, _identificador: str) -> None:
         """Se ha abierto otra memoria.

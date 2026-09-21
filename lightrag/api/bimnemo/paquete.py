@@ -72,6 +72,35 @@ def _pedir_json(url: str) -> Optional[dict[str, Any]]:
         return None
 
 
+def numeros(version: str) -> Optional[tuple[int, ...]]:
+    """``v1.4.0-nativa`` → ``(1, 4, 0)``. ``None`` si no es una versión.
+
+    El sufijo tras el guion se ignora al ordenar: ``1.4.0-nativa`` y
+    ``1.4.0`` son la misma versión para decidir si hay otra más nueva.
+    """
+    limpio = (version or "").strip().lstrip("vV").split("-", 1)[0]
+    partes = limpio.split(".")
+    if not limpio or not all(p.isdigit() for p in partes):
+        return None
+    return tuple(int(p) for p in partes)
+
+
+def es_mas_nueva(publicada: str, instalada: str) -> bool:
+    """¿Es ``publicada`` posterior a ``instalada``?
+
+    **No vale con que sean distintas.** Comparando con ``!=``, quien tenía la
+    1.4 veía la 1.2.3 publicada como «versión nueva» y la actualización le
+    devolvía a una versión vieja —la de la interfaz web—. Si alguna de las dos
+    no se entiende como versión, se contesta que no: ofrecer una
+    actualización dudosa es peor que no ofrecer ninguna.
+    """
+    a, b = numeros(publicada), numeros(instalada)
+    if a is None or b is None:
+        return False
+    largo = max(len(a), len(b))
+    return a + (0,) * (largo - len(a)) > b + (0,) * (largo - len(b))
+
+
 def ultima_version(repo: str) -> Optional[dict[str, Any]]:
     """La última versión publicada, o ``None`` si no se pudo preguntar."""
     return _pedir_json(f"https://api.github.com/repos/{repo}/releases/latest")
@@ -173,6 +202,20 @@ def traer(repo: str, raiz: Path) -> dict[str, Any]:
     if not etiqueta or not url:
         return {"ok": False, "reason": "release", "message": "La versión publicada está incompleta."}
 
+    # Segunda barrera, aquí y no solo en la pantalla: este es el sitio que
+    # escribe en disco, y bajar de versión encima de una instalación mezcla
+    # ficheros de dos épocas distintas.
+    instalada = version_instalada(raiz) or ""
+    if not es_mas_nueva(etiqueta, instalada):
+        return {
+            "ok": False,
+            "reason": "older",
+            "message": (
+                f"La versión publicada ({etiqueta}) no es más nueva que la "
+                f"instalada ({instalada or 'desconocida'})."
+            ),
+        }
+
     with tempfile.TemporaryDirectory(prefix="bimnemo-zip-") as tmp:
         paquete = Path(tmp) / "bimnemo.zip"
         if not _descargar(url, paquete):
@@ -237,6 +280,8 @@ def python_del_entorno(raiz: Path) -> str:
 
 __all__ = [
     "desplegar",
+    "es_mas_nueva",
+    "numeros",
     "escribir_version",
     "leer_pyproject",
     "python_del_entorno",

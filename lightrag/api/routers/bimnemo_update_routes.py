@@ -58,6 +58,26 @@ def create_bimnemo_update_routes(
     combined_auth = get_combined_auth_dependency(api_key)
     router = APIRouter(tags=["bimnemo"])
 
+    # En qué va la actualización lanzada desde este proceso. Si la descarga
+    # falla, el motor no se reinicia —no hay nada nuevo que cargar— y sin esto
+    # la ventana solo vería que el motor sigue siendo el mismo, y esperaría
+    # hasta agotar el plazo sin saber por qué.
+    progreso: dict[str, str] = {"state": "idle", "message": ""}
+
+    @router.get(
+        "/update/progress",
+        dependencies=[Depends(combined_auth)],
+        summary="En qué va la actualización en curso",
+    )
+    async def update_progress() -> dict[str, str]:
+        """``idle``, ``working`` o ``failed``, con el motivo si falló.
+
+        No hay ``done``: cuando termina bien, el motor se reinicia y quien
+        contesta es otro proceso, que vuelve a decir ``idle``. Eso lo ve la
+        ventana por el ``boot_id``.
+        """
+        return dict(progreso)
+
     @router.get(
         "/update",
         dependencies=[Depends(combined_auth)],
@@ -121,6 +141,7 @@ def create_bimnemo_update_routes(
             )
 
         async def _trabajo() -> None:
+            progreso.update(state="working", message="")
             resultado = await asyncio.to_thread(
                 actualizacion.aplicar, request.discard_local_changes
             )
@@ -129,6 +150,10 @@ def create_bimnemo_update_routes(
                     "BIMNEMO: la actualización falló (%s): %s",
                     resultado.get("reason"),
                     resultado.get("message"),
+                )
+                progreso.update(
+                    state="failed",
+                    message=str(resultado.get("message") or "La actualización falló."),
                 )
                 return
 

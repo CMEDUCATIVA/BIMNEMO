@@ -289,6 +289,22 @@ def hoja(p: Paleta) -> str:
         border: 1px solid {p.borde};
         border-radius: 12px;
     }}
+    /* «Actualizar», en la barra: parpadea entre el azul lleno y el suave
+       mientras haya una versión nueva. Se ve desde cualquier pantalla sin
+       tapar nada. */
+    QPushButton#actualizar {{
+        background: {p.azul};
+        color: {p.sobre_azul};
+        border: 1px solid {p.azul};
+        border-radius: 12px;
+        padding: 3px 12px;
+        font-weight: 600;
+    }}
+    QPushButton#actualizar[encendido="false"] {{
+        background: {p.azul_suave};
+        color: {p.azul};
+    }}
+
     /* El cuadro de la primera vez, encima del velo. Algo más de sombra
        visual que una tarjeta —borde más marcado— porque flota sobre todo. */
     #bienvenida {{

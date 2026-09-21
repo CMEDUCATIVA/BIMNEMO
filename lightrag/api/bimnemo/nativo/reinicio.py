@@ -47,6 +47,14 @@ class Reinicio(QObject):
     #: `True` si el motor volvió; si no, `False` y el motivo.
     terminado = Signal(bool, str)
 
+    #: Lo que se le pide al motor para que se vaya y vuelva. Actualizar es lo
+    #: mismo con otra ruta: el motor trae la versión nueva y se reinicia, y lo
+    #: que se espera es idéntico —un `boot_id` distinto—.
+    RUTA = "/bimnemo/restart"
+    PASO = "Pidiendo el reinicio…"
+    #: Cuánto se espera antes de rendirse, en milisegundos.
+    PLAZO = PLAZO_MS
+
     def __init__(self, motor: Motor, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self.motor = motor
@@ -79,8 +87,8 @@ class Reinicio(QObject):
     def _apuntar_y_pedir(self, datos: object) -> None:
         if isinstance(datos, dict):
             self._boot_anterior = datos.get("boot_id")
-        self.paso.emit("Pidiendo el reinicio…")
-        self.motor.post("/bimnemo/restart", {}, self._pedido, self._no_pudo)
+        self.paso.emit(self.PASO)
+        self.motor.post(self.RUTA, {}, self._pedido, self._no_pudo)
 
     def _pedido(self, _datos: object) -> None:
         self.paso.emit("Esperando a que el motor vuelva…")
@@ -106,10 +114,10 @@ class Reinicio(QObject):
         self._transcurrido += SONDEO_MS
         self.avance.emit(self._transcurrido)
 
-        if self._transcurrido >= PLAZO_MS:
+        if self._transcurrido >= self.PLAZO:
             self._terminar(
                 False,
-                "El motor no ha vuelto en un minuto. Cierra BIMNEMO y "
+                "El motor no ha vuelto a tiempo. Cierra BIMNEMO y "
                 "vuelve a abrirlo.",
             )
             return
