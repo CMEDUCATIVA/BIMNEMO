@@ -39,6 +39,12 @@ ESPEJOS = {
     "/bimnemo/memory/search": "/nemo/{id}/memory/search",
 }
 
+#: Lo que se contesta cuando el motor pide autenticación. Es una constante y
+#: no un texto suelto porque la barra superior la compara para enseñar
+#: «Requiere clave» en vez de «Motor no disponible»: son dos problemas
+#: distintos y se arreglan de formas distintas.
+PIDE_CLAVE = "El motor pide una clave de acceso."
+
 #: Rutas que **nombran** una memoria en vez de trabajar dentro de una. El
 #: registro de memorias se administra desde fuera de cualquiera de ellas.
 SIN_MEMORIA = ("/bimnemo/nemos",)
@@ -68,6 +74,11 @@ class Motor(QObject):
     def usar_clave(self, clave: str) -> None:
         """La clave de acceso, si el usuario la tiene activada."""
         self._clave = clave or ""
+
+    @property
+    def clave(self) -> str:
+        """La que se está presentando ahora. Vacía si la API está abierta."""
+        return self._clave
 
     # -- memoria activa -----------------------------------------------------
 
@@ -139,9 +150,7 @@ class Motor(QObject):
         peticion = self._peticion(ruta)
         datos = QByteArray(json.dumps(cuerpo or {}).encode("utf-8"))
         respuesta = self._red.sendCustomRequest(peticion, b"DELETE", datos)
-        respuesta.finished.connect(
-            lambda: self._recoger(respuesta, ruta, bien, mal)
-        )
+        respuesta.finished.connect(lambda: self._recoger(respuesta, ruta, bien, mal))
 
     def parchear(
         self,
@@ -206,9 +215,7 @@ class Motor(QObject):
             respuesta.uploadProgress.connect(
                 lambda hecho, total: avance(int(hecho), int(total))
             )
-        respuesta.finished.connect(
-            lambda: self._recoger(respuesta, ruta, bien, mal)
-        )
+        respuesta.finished.connect(lambda: self._recoger(respuesta, ruta, bien, mal))
 
     def _peticion(self, ruta: str) -> QNetworkRequest:
         peticion = QNetworkRequest(QUrl(f"{self.base}{self._resolver(ruta)}"))
@@ -233,9 +240,7 @@ class Motor(QObject):
             datos = QByteArray(json.dumps(cuerpo or {}).encode("utf-8"))
             respuesta = self._red.post(peticion, datos)
 
-        respuesta.finished.connect(
-            lambda: self._recoger(respuesta, ruta, bien, mal)
-        )
+        respuesta.finished.connect(lambda: self._recoger(respuesta, ruta, bien, mal))
 
     def _recoger(
         self,
@@ -248,9 +253,7 @@ class Motor(QObject):
         # mientras se ejecuta esta función, y borrarla aquí es un cierre
         # inmediato de los que no dejan ni mensaje.
         try:
-            estado = respuesta.attribute(
-                QNetworkRequest.HttpStatusCodeAttribute
-            )
+            estado = respuesta.attribute(QNetworkRequest.HttpStatusCodeAttribute)
             crudo = bytes(respuesta.readAll().data())
 
             if respuesta.error() != QNetworkReply.NoError and not estado:
@@ -292,5 +295,5 @@ class Motor(QObject):
                 if isinstance(valor, str) and valor.strip():
                     return valor
         if estado in (401, 403):
-            return "El motor pide una clave de acceso."
+            return PIDE_CLAVE
         return f"El motor respondió {estado} en {ruta}."

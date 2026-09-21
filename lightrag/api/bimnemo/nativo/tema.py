@@ -534,9 +534,25 @@ def hoja(p: Paleta) -> str:
         color: {p.texto_2};
         padding: 6px 9px;
     }}
+    /* El botón de copiar de cada fila de la tabla: solo el icono.
+       Sin `padding: 0` Qt le suma el relleno de un botón normal y el icono
+       sale recortado dentro de sus 28 px. */
     QPushButton#copiar-linea {{
-        padding: 3px 12px;
-        font-size: 12px;
+        background: transparent;
+        border: 1px solid transparent;
+        padding: 0;
+    }}
+    QPushButton#copiar-linea:hover {{
+        background: {p.secundaria};
+        border-color: {p.borde};
+    }}
+
+    /* Los títulos de las columnas de la tabla de endpoints. */
+    #columna {{
+        color: {p.texto_3};
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1px;
     }}
     #rotulo-ambito {{
         color: {p.texto_3};

@@ -1,8 +1,9 @@
 """Pantalla «API»: cómo conectar cualquier IA a esta memoria.
 
 Los mismos paneles que la interfaz web y en su orden: la dirección, los
-endpoints por ámbito —esta memoria, todas las memorias, el motor—, un
-ejemplo, los modos de recuperación y el acceso.
+endpoints por ámbito —esta memoria, todas las memorias, el motor—, los
+ejemplos, la instrucción para un agente, los modos de recuperación y el
+acceso.
 
 ## Las rutas siguen a la memoria abierta
 
@@ -10,6 +11,14 @@ Cambiar de memoria **cambia los endpoints que se enseñan**. No es cosmética:
 con «Obra Sur» abierta, copiar `/bimnemo/memory/search` lee la memoria por
 defecto. Funciona al pegarlo y devuelve lo que no es, que es peor que
 fallar. Quien resuelve cada ruta es `api_rutas`.
+
+## Los endpoints van en tabla, no en fichas
+
+Cuatro columnas —acción, ruta, para qué sirve y copiar— que mandan sobre
+todas las filas del ámbito. Antes cada endpoint repartía su ancho a su aire
+y llevaba debajo su cuerpo JSON: doce bloques amontonados en los que había
+que leerlo todo para encontrar uno. El cuerpo no se ha perdido, está en lo
+que copia el botón y en su globo de ayuda.
 
 ## Swagger y ReDoc se abren fuera
 
@@ -21,34 +30,40 @@ puede hacer aquí.
 
 from __future__ import annotations
 
-import secrets
-from typing import Any
+from typing import Callable
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from lightrag.api.bimnemo.manifiesto import AMBITOS, ENDPOINTS, MODOS
-from lightrag.api.bimnemo.nativo import api_piezas, api_rutas, api_textos, iconos
+from lightrag.api.bimnemo.nativo import (
+    api_acceso,
+    api_piezas,
+    api_rutas,
+    api_textos,
+    iconos,
+)
 from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo.piezas import Aviso, Pantalla, Tarjeta
 
 #: Las tres solapas, con lo que abre cada una. La «Guía» es esta pantalla.
 SOLAPAS = (("Guía", ""), ("Swagger", "/docs"), ("ReDoc", "/redoc"))
 
-#: Longitud de la clave que se genera, y su alfabeto.
-#:
-#: Sin parejas que se confundan al copiarlas a mano: nada de `0/O` ni de
-#: `1/l/I`. Una clave que se teclea mal es una clave que parece rota.
-LARGO_CLAVE = 32
-ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+#: Qué se dice a la derecha del título de cada ámbito. Sin esto, «Todas las
+#: memorias» y «El motor» se leen como si también dependieran de cuál esté
+#: abierta, que es justo lo contrario de lo que significan.
+NOTA_AMBITO = {
+    "todas": "Sin importar cuál esté abierta",
+    "motor": "LightRAG por debajo",
+}
 
 
 class PantallaApi(Pantalla):
@@ -61,16 +76,16 @@ class PantallaApi(Pantalla):
         self.motor = motor
         self.base = motor.base
         self._memoria = motor.memoria
-        self._clave = ""
         self._paneles: list = []
+        self._instruccion = ""
 
         self.aviso = Aviso()
         self.anadir(self._encabezado())
         self.anadir(self.aviso)
         self.anadir(self._direccion())
 
-        # Los paneles de endpoints se rehacen al cambiar de memoria, así que
-        # van en su propio contenedor y no sueltos en la pantalla.
+        # Las tablas se rehacen al cambiar de memoria, así que van en su
+        # propio contenedor y no sueltas en la pantalla.
         zona = QWidget()
         zona.setObjectName("fila")
         self.caja_endpoints = QVBoxLayout(zona)
@@ -78,9 +93,17 @@ class PantallaApi(Pantalla):
         self.caja_endpoints.setSpacing(16)
         self.anadir(zona)
 
-        self.anadir(self._ejemplo())
+        self.curl = self._ficha_de_codigo("Ejemplo — curl")
+        self.python = self._ficha_de_codigo("Ejemplo — Python")
+        self.agente = self._ficha_de_codigo(
+            "Instrucción para un agente", alto=260, icono="conversacion"
+        )
+
         self.anadir(self._modos())
-        self.anadir(self._acceso())
+
+        self.acceso = api_acceso.PanelAcceso(motor)
+        self.acceso.cambiada.connect(self._refrescar_ejemplos)
+        self.anadir(self.acceso)
         self.cerrar_con_espacio()
 
         self.refrescar()
@@ -99,7 +122,11 @@ class PantallaApi(Pantalla):
         copiar.setObjectName("principal")
         copiar.setIcon(iconos.icono("copiar", 14, "#ffffff"))
         copiar.setCursor(Qt.PointingHandCursor)
-        copiar.clicked.connect(self._copiar_para_la_ia)
+        copiar.setToolTip(
+            "Todo lo que una IA necesita para usar esta memoria: la "
+            "dirección, los endpoints ya resueltos y cómo llamarlos."
+        )
+        copiar.clicked.connect(lambda: self._copiado(self._instruccion))
         fila.addWidget(copiar)
 
         self.solapas = api_piezas.Pestanas(tuple(n for n, _r in SOLAPAS))
@@ -121,9 +148,7 @@ class PantallaApi(Pantalla):
     # -- paneles ------------------------------------------------------------
 
     def _direccion(self) -> QWidget:
-        panel = api_piezas.Panel(
-            "Dirección de la memoria", "entidades", "Sin autenticación"
-        )
+        panel = api_piezas.Panel("Dirección de la memoria", "entidades")
         self.panel_direccion = panel
 
         panel.anadir(
@@ -142,7 +167,7 @@ class PantallaApi(Pantalla):
         return panel
 
     def _pintar_endpoints(self) -> None:
-        """Rehace los paneles con las rutas de la memoria abierta."""
+        """Rehace las tablas con las rutas de la memoria abierta."""
         while self.caja_endpoints.count():
             viejo = self.caja_endpoints.takeAt(0)
             if viejo.widget():
@@ -150,153 +175,70 @@ class PantallaApi(Pantalla):
 
         self._paneles = api_rutas.por_ambito(ENDPOINTS, self._memoria, AMBITOS)
         for clave, titulo, filas in self._paneles:
-            nota = (self._memoria or "General") if clave == "esta" else ""
+            nota = NOTA_AMBITO.get(clave, self._memoria or "General")
             panel = api_piezas.Panel(titulo, "api", nota)
-            for fila in filas:
-                panel.anadir(api_piezas.Fila(fila, self.base))
+            panel.anadir(api_piezas.Tabla(filas, self.base))
             self.caja_endpoints.addWidget(panel)
 
-    def _ejemplo(self) -> QWidget:
-        panel = api_piezas.Panel("Ejemplo", "copiar")
+    def _ficha_de_codigo(
+        self, titulo: str, alto: int = 0, icono: str = "code"
+    ) -> QPlainTextEdit:
+        """Una ficha con su código dentro y el botón de copiar en la cabecera.
 
-        self.ejemplo_curl = self._bloque_de_codigo(panel)
-        self.ejemplo_python = self._bloque_de_codigo(panel)
+        El botón va **arriba**, no debajo del bloque: es donde lo busca quien
+        ya ha leído el título y solo quiere llevárselo. Al final del bloque
+        hay que desplazarse para encontrarlo.
+        """
+        panel = api_piezas.Panel(titulo, icono, boton="Copiar")
 
-        fila = QWidget()
-        fila.setObjectName("fila")
-        caja = QHBoxLayout(fila)
-        caja.setContentsMargins(0, 0, 0, 0)
-        caja.addStretch(1)
-        for rotulo, dame in (
-            ("Copiar curl", lambda: self.ejemplo_curl.text()),
-            ("Copiar Python", lambda: self.ejemplo_python.text()),
-        ):
-            boton = QPushButton(rotulo)
-            boton.setCursor(Qt.PointingHandCursor)
-            boton.clicked.connect(lambda _c=False, d=dame: self._copiado(d()))
-            caja.addWidget(boton)
-        panel.anadir(fila)
-        return panel
+        caja = QPlainTextEdit()
+        caja.setObjectName("codigo")
+        caja.setReadOnly(True)
+        caja.setLineWrapMode(QPlainTextEdit.NoWrap)
+        if alto:
+            caja.setFixedHeight(alto)
+        panel.anadir(caja)
+
+        if panel.boton is not None:
+            panel.boton.clicked.connect(
+                lambda _m=False, c=caja: self._copiado(c.toPlainText())
+            )
+        self.anadir(panel)
+        # El alto se ajusta al contenido salvo que se haya fijado: un bloque
+        # de seis líneas con la altura por defecto de Qt sale con barra de
+        # desplazamiento y media línea cortada.
+        caja.ajustar = None if alto else self._ajustador(caja)  # type: ignore[attr-defined]
+        return caja
 
     @staticmethod
-    def _bloque_de_codigo(panel: api_piezas.Panel) -> QLabel:
-        etiqueta = QLabel("")
-        etiqueta.setObjectName("codigo")
-        etiqueta.setWordWrap(True)
-        etiqueta.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        panel.anadir(etiqueta)
-        return etiqueta
+    def _ajustador(caja: QPlainTextEdit) -> Callable[[], None]:
+        """Deja el bloque a la altura de lo que lleva dentro.
+
+        Se cuenta todo lo que ocupa sitio y no es texto: los márgenes del
+        documento, el relleno que le pone la hoja de estilo y **la barra
+        horizontal**. Un `curl` no cabe de ancho en ninguna pantalla, así que
+        esa barra siempre aparece; sin reservarle su hueco se comía la última
+        línea del ejemplo, que es justo la que lleva la pregunta.
+        """
+
+        def ajustar() -> None:
+            lineas = caja.document().blockCount()
+            alto = caja.fontMetrics().lineSpacing() * lineas
+            alto += 2 * int(caja.document().documentMargin()) + 20
+            alto += caja.horizontalScrollBar().sizeHint().height()
+            caja.setFixedHeight(min(int(alto), 420))
+
+        return ajustar
 
     def _modos(self) -> QWidget:
-        panel = api_piezas.Panel("Modos de recuperación", "trozos")
+        panel = api_piezas.Panel(
+            "Modos de recuperación", "trozos", 'El campo "mode" de las consultas'
+        )
         tarjeta = Tarjeta()
         for nombre, explicacion in MODOS.items():
             tarjeta.dato(nombre, explicacion)
         panel.anadir(tarjeta)
         return panel
-
-    # -- acceso -------------------------------------------------------------
-
-    def _acceso(self) -> QWidget:
-        panel = api_piezas.Panel("Acceso a la API", "motor")
-
-        texto = QLabel(
-            "Por defecto la memoria está abierta a cualquier programa de esta "
-            "máquina. Al exigir clave, quien la use tendrá que mandarla en la "
-            "cabecera X-API-Key.\n\n"
-            "El guardia de las rutas se construye al arrancar el motor, así "
-            "que el cambio pide un reinicio."
-        )
-        texto.setObjectName("descripcion")
-        texto.setWordWrap(True)
-        panel.anadir(texto)
-
-        fila = QWidget()
-        fila.setObjectName("fila")
-        caja = QHBoxLayout(fila)
-        caja.setContentsMargins(0, 0, 0, 0)
-        caja.setSpacing(10)
-
-        self.interruptor = api_piezas.Interruptor()
-        self.interruptor.clicked.connect(self._cambiar_acceso)
-        caja.addWidget(self.interruptor)
-
-        self.estado_acceso = QLabel("Abierta, sin clave")
-        self.estado_acceso.setObjectName("dato-valor")
-        caja.addWidget(self.estado_acceso, 1)
-        panel.anadir(fila)
-
-        self.caja_clave = QWidget()
-        self.caja_clave.setObjectName("fila")
-        caja2 = QHBoxLayout(self.caja_clave)
-        caja2.setContentsMargins(0, 0, 0, 0)
-        caja2.setSpacing(10)
-
-        self.clave = QLineEdit()
-        self.clave.setReadOnly(True)
-        self.clave.setPlaceholderText("Se genera al activar")
-        caja2.addWidget(self.clave, 1)
-
-        copiar = QPushButton("Copiar clave")
-        copiar.setCursor(Qt.PointingHandCursor)
-        copiar.clicked.connect(lambda: self._copiado(self.clave.text()))
-        caja2.addWidget(copiar)
-
-        self.caja_clave.hide()
-        panel.anadir(self.caja_clave)
-        return panel
-
-    def _cambiar_acceso(self) -> None:
-        exigir = self.interruptor.isChecked()
-        cuerpo: dict[str, Any] = {"enabled": exigir}
-        if exigir:
-            # La clave se genera **aquí** y se enseña una vez: el motor solo
-            # guarda que la exige, y no hay forma de recuperarla después. Por
-            # eso el campo de copiar aparece justo al activarla.
-            self._clave = "".join(
-                secrets.choice(ALFABETO) for _ in range(LARGO_CLAVE)
-            )
-            cuerpo["key"] = self._clave
-
-        self.motor.post(
-            "/bimnemo/access", cuerpo, self._acceso_cambiado, self._fallo_acceso
-        )
-
-    def _acceso_cambiado(self, datos: Any) -> None:
-        if not isinstance(datos, dict):
-            return
-        exigir = bool(datos.get("enabled"))
-        self._pintar_acceso(exigir)
-
-        if exigir:
-            self.clave.setText(self._clave)
-            # Que la ventana siga hablando con el motor tras el reinicio.
-            self.motor.usar_clave(self._clave)
-        else:
-            self._clave = ""
-            self.motor.usar_clave("")
-
-        mensaje = str(datos.get("message") or "")
-        if datos.get("restart_required"):
-            mensaje += "  Reinicia el motor para que tenga efecto."
-        self.aviso.acertar(mensaje.strip() or "Guardado.")
-        self._refrescar_ejemplos()
-
-    def _fallo_acceso(self, motivo: str) -> None:
-        # El interruptor vuelve a donde estaba: dejarlo encendido cuando el
-        # motor ha dicho que no es mentirle al usuario.
-        self.interruptor.setChecked(not self.interruptor.isChecked())
-        self.aviso.fallar(motivo)
-
-    def _pintar_acceso(self, exigir: bool) -> None:
-        self.interruptor.setChecked(exigir)
-        self.estado_acceso.setText(
-            "Exige clave" if exigir else "Abierta, sin clave"
-        )
-        self.panel_direccion.nota.setText(
-            "Exige clave" if exigir else "Sin autenticación"
-        )
-        self.caja_clave.setVisible(exigir)
 
     # -- datos --------------------------------------------------------------
 
@@ -304,6 +246,7 @@ class PantallaApi(Pantalla):
         self._memoria = self.motor.memoria
         self._pintar_endpoints()
         self._refrescar_ejemplos()
+        self.acceso.refrescar()
 
     def cambiar_memoria(self, nemo: str) -> None:
         """La ventana llama a esto al cambiar de memoria."""
@@ -323,23 +266,30 @@ class PantallaApi(Pantalla):
         super().showEvent(evento)
         self.cambiar_memoria(self.motor.memoria)
 
-    def _refrescar_ejemplos(self) -> None:
+    def _refrescar_ejemplos(self, _clave: str = "") -> None:
+        """Rehace los tres bloques. Lleva dentro la clave si la hay.
+
+        Con la API protegida se escribe **la de verdad**, no un hueco que
+        rellenar: el botón de copiar tiene que entregar algo que funcione al
+        pegarlo. Ese es el sentido de proteger y compartir.
+        """
+        clave = self.motor.clave
         rutas = api_rutas.de_memoria(ENDPOINTS, self._memoria)
-        self.ejemplo_curl.setText(
-            api_textos.ejemplo_curl(self.base, rutas, self._clave)
+
+        self.curl.setPlainText(api_textos.ejemplo_curl(self.base, rutas, clave))
+        self.python.setPlainText(
+            api_textos.ejemplo_python(self.base, rutas, clave)
         )
-        self.ejemplo_python.setText(
-            api_textos.ejemplo_python(self.base, rutas, self._clave)
+        self._instruccion = api_textos.instrucciones(
+            self.base, self._memoria, self._paneles, MODOS, clave
         )
+        self.agente.setPlainText(self._instruccion)
+
+        for caja in (self.curl, self.python):
+            if caja.ajustar:  # type: ignore[attr-defined]
+                caja.ajustar()  # type: ignore[attr-defined]
 
     # -- copiar -------------------------------------------------------------
-
-    def _copiar_para_la_ia(self) -> None:
-        self._copiado(
-            api_textos.instrucciones(
-                self.base, self._memoria, self._paneles, MODOS, self._clave
-            )
-        )
 
     def _copiado(self, texto: str) -> None:
         api_piezas.al_portapapeles(texto)

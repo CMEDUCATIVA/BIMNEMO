@@ -29,9 +29,14 @@
 
 import { agruparPorAmbito } from './apiview-rutas.js';
 
-/** Cuerpo de ejemplo en una línea, si lo lleva. */
+/**
+ * Cuerpo de ejemplo en una línea, si lo lleva, con la etiqueta delante.
+ *
+ * Sin ella, el JSON colgando bajo la descripción se lee como un resto pegado
+ * por error. Con ella dice lo que es: lo que hay que mandar en el cuerpo.
+ */
 function cuerpo(ep) {
-  return ep.body ? `\n      ${JSON.stringify(ep.body)}` : '';
+  return ep.body ? `\n      cuerpo JSON: ${JSON.stringify(ep.body)}` : '';
 }
 
 function bloque(titulo, filas) {

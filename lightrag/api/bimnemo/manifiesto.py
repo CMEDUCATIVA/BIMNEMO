@@ -42,6 +42,15 @@ from typing import Any
 #:
 #: Cada entrada lleva ``group`` para agruparla y ``body`` con el cuerpo mínimo
 #: que hay que mandar (``None`` cuando no lleva cuerpo).
+#: Los valores de ejemplo de los cuerpos.
+#:
+#: Antes eran huecos entre ángulos —``"<la pregunta>"``—. Correctos como
+#: descriptor y basura en pantalla: no se pueden pegar, y quien los lee tiene
+#: que traducirlos antes de usarlos. Un valor de verdad se entiende igual y
+#: además funciona tal cual.
+PREGUNTA = "¿Qué dicen los pliegos sobre plazos?"
+RECUERDO = "El plazo de ejecución es de 180 días."
+
 ENDPOINTS: list[dict[str, Any]] = [
     # -- Consultar ---------------------------------------------------------
     {
@@ -54,7 +63,7 @@ ENDPOINTS: list[dict[str, Any]] = [
             "No gasta el LLM que redacta: es lo que quiere un agente que ya "
             "tiene su propio modelo."
         ),
-        "body": {"query": "<la pregunta>", "mode": "mix"},
+        "body": {"query": PREGUNTA, "mode": "mix"},
     },
     {
         "method": "POST",
@@ -66,7 +75,7 @@ ENDPOINTS: list[dict[str, Any]] = [
             "gasta el LLM que redacta: es lo que quiere un agente que ya tiene "
             "su propio modelo."
         ),
-        "body": {"query": "<la pregunta>", "mode": "mix"},
+        "body": {"query": PREGUNTA, "mode": "mix"},
     },
     {
         "method": "POST",
@@ -77,7 +86,7 @@ ENDPOINTS: list[dict[str, Any]] = [
             "Buscar en TODAS las memorias a la vez. Útil cuando no se sabe en "
             "cuál está la respuesta."
         ),
-        "body": {"query": "<la pregunta>", "mode": "mix"},
+        "body": {"query": PREGUNTA, "mode": "mix"},
     },
     {
         "method": "POST",
@@ -85,7 +94,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "group": "consultar",
         "scope": "todas",
         "purpose": "Preguntar a todas las memorias y que el motor redacte la respuesta.",
-        "body": {"query": "<la pregunta>", "mode": "mix"},
+        "body": {"query": PREGUNTA, "mode": "mix"},
     },
     {
         "method": "POST",
@@ -93,7 +102,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "group": "consultar",
         "scope": "motor",
         "purpose": "Pregunta y respuesta completa generada por el motor (gasta LLM).",
-        "body": {"query": "<la pregunta>", "mode": "mix"},
+        "body": {"query": PREGUNTA, "mode": "mix"},
     },
     {
         "method": "POST",
@@ -101,7 +110,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "group": "consultar",
         "scope": "motor",
         "purpose": "Igual que /query, en streaming NDJSON.",
-        "body": {"query": "<la pregunta>", "mode": "mix"},
+        "body": {"query": PREGUNTA, "mode": "mix"},
     },
     # -- Explorar ----------------------------------------------------------
     {
@@ -149,7 +158,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "group": "guardar",
         "scope": "esta",
         "purpose": "Guardar un texto en la memoria activa. Se indexa como un documento más.",
-        "body": {"text": "<lo que hay que recordar>", "source": "<de dónde sale>"},
+        "body": {"text": RECUERDO, "source": "acta-2026-09"},
     },
     {
         "method": "POST",
@@ -159,7 +168,7 @@ ENDPOINTS: list[dict[str, Any]] = [
         "purpose": (
             "Guardar un texto en esta memoria. Se indexa como un documento más."
         ),
-        "body": {"text": "<lo que hay que recordar>", "source": "<de dónde sale>"},
+        "body": {"text": RECUERDO, "source": "acta-2026-09"},
     },
     {
         "method": "POST",
@@ -182,7 +191,7 @@ ENDPOINTS: list[dict[str, Any]] = [
             "Borrar documentos de esta memoria CON lo que el motor aprendió de "
             "ellos: sus fragmentos y sus entidades. No se puede deshacer."
         ),
-        "body": {"doc_ids": ["<doc_id>"], "delete_file": True},
+        "body": {"doc_ids": ["doc-a1b2c3d4"], "delete_file": True},
     },
     {
         "method": "DELETE",

@@ -5,6 +5,11 @@ abierta. **Ninguno está escrito a mano con una ruta fija dentro**, y ese es
 el punto: un ejemplo que dice `/bimnemo/memory/search` mientras hay abierta
 «Obra Sur» funciona al pegarlo y lee otra memoria. Devolver lo que no es,
 sin fallar, es peor que fallar.
+
+Los valores de ejemplo —la pregunta, lo que se recuerda— son los mismos que
+el manifiesto trae en los cuerpos, y por tanto los mismos que la web. Dos
+juegos de ejemplos acaban discrepando, y el que discrepa sin que nadie lo
+note es justo el que alguien pegó una vez en una skill.
 """
 
 from __future__ import annotations
@@ -12,38 +17,47 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from lightrag.api.bimnemo.manifiesto import PREGUNTA, RECUERDO
+
 
 def ejemplo_curl(base: str, rutas: dict[str, str], clave: str = "") -> str:
     """Una llamada de ejemplo, lista para pegar en una terminal."""
-    cabecera = f' \\\n  -H "X-API-Key: {clave}"' if clave else ""
-    cuerpo = json.dumps(
-        {"query": "¿Qué acuerdos se tomaron?", "mode": "mix"},
-        ensure_ascii=False,
-    )
+    cabecera = f'\n  -H "X-API-Key: {clave}" \\' if clave else ""
+    cuerpo = json.dumps({"query": PREGUNTA, "mode": "mix"}, ensure_ascii=False)
     return (
-        f'curl -X POST "{base}{rutas["buscar"]}" \\\n'
-        f'  -H "Content-Type: application/json"{cabecera} \\\n'
+        f'curl -X POST "{base}{rutas["buscar"]}" \\{cabecera}\n'
+        f'  -H "Content-Type: application/json" \\\n'
         f"  -d '{cuerpo}'"
     )
 
 
 def ejemplo_python(base: str, rutas: dict[str, str], clave: str = "") -> str:
-    """Lo mismo en Python, que es como lo llamará un agente."""
-    cabeceras = '{"Content-Type": "application/json"'
-    if clave:
-        cabeceras += f', "X-API-Key": "{clave}"'
-    cabeceras += "}"
+    """Lo mismo en Python, que es como lo llamará un agente.
 
+    Van las dos mitades —recuperar y guardar— porque son las dos cosas que
+    hace una memoria. Con solo la consulta, `remember` queda como una línea
+    de una tabla que nadie prueba.
+    """
+    cabeceras = f'\n    headers={{"X-API-Key": "{clave}"}},' if clave else ""
+    buscar = json.dumps({"query": PREGUNTA, "mode": "mix"}, ensure_ascii=False)
+    guardar = json.dumps(
+        {"text": RECUERDO, "source": "acta-2026-09"}, ensure_ascii=False
+    )
     return (
-        "import requests\n\n"
-        f'BASE = "{base}"\n\n'
-        "respuesta = requests.post(\n"
-        f'    BASE + "{rutas["buscar"]}",\n'
-        f"    headers={cabeceras},\n"
-        '    json={"query": "¿Qué acuerdos se tomaron?", "mode": "mix"},\n'
+        "import httpx\n\n"
+        "# Recuperar contexto SIN gastar el LLM que redacta.\n"
+        "respuesta = httpx.post(\n"
+        f'    "{base}{rutas["buscar"]}",{cabeceras}\n'
+        f"    json={buscar},\n"
         "    timeout=120,\n"
         ")\n"
-        "print(respuesta.json())"
+        'contexto = respuesta.json()["context"]\n\n'
+        "# Guardar algo nuevo en la memoria.\n"
+        "httpx.post(\n"
+        f'    "{base}{rutas["recordar"]}",{cabeceras}\n'
+        f"    json={guardar},\n"
+        "    timeout=60,\n"
+        ")"
     )
 
 
@@ -59,12 +73,18 @@ def instrucciones(
     Se genera de lo que hay en pantalla, así que dice **las rutas de la
     memoria abierta**, no las plantillas del manifiesto. Si mañana hay un
     endpoint más, aparece aquí solo.
+
+    El cuerpo de cada llamada sí va aquí —al revés que en la tabla, donde
+    estorbaba—. Quien lee esto es un modelo que tiene que escribir la
+    petición entera sin poder preguntar: saber que existe `remember` no le
+    dice **qué** mandarle, y sin esa línea acaba en Swagger o inventándoselo.
     """
     lineas = [
         "# BIMNEMO — memoria de conocimiento local",
         "",
         f"Dirección: {base}",
         f"Memoria abierta: {memoria or 'la de por defecto'}",
+        "Las rutas de abajo ya apuntan a ella: úsalas tal cual, sin sustituir nada.",
         "Todas las peticiones con cuerpo van en JSON.",
     ]
     if clave:
@@ -82,7 +102,8 @@ def instrucciones(
             lineas.append(f"    {fila.get('purpose')}")
             if fila.get("body"):
                 lineas.append(
-                    "    cuerpo: " + json.dumps(fila["body"], ensure_ascii=False)
+                    "    cuerpo JSON: "
+                    + json.dumps(fila["body"], ensure_ascii=False)
                 )
         lineas.append("")
 
