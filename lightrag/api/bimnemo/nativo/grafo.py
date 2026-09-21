@@ -595,11 +595,20 @@ class Grafo(QWidget):
             self._elegido = i
             self._aislar(i)
             self.elegido.emit(self._nodos[i])
-            # Al mover un nodo se recalienta un poco la simulación: si no,
-            # el grafo se queda como estaba y el arrastre no sirve de nada.
-            self._alpha = max(self._alpha, 0.35)
-            if not self._reloj.isActive():
-                self._reloj.start()
+
+            # Recalentar la simulación **solo si hay simulación**.
+            #
+            # Con una disposición fija —circular, por tipos, radial— los
+            # nodos están colocados a propósito, y encender las fuerzas al
+            # pulsar uno deshacía el círculo entero: bastaba con elegir una
+            # entidad para perder la disposición que se acababa de pedir.
+            #
+            # En las de fuerzas sí se recalienta, porque si no el grafo se
+            # queda rígido y arrastrar un nodo no sirve de nada.
+            if disposicion.es_simulacion(self._disposicion):
+                self._alpha = max(self._alpha, 0.35)
+                if not self._reloj.isActive():
+                    self._reloj.start()
         else:
             self._paneando = evento.position()
             self._elegido = None
