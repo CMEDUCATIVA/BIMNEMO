@@ -126,10 +126,10 @@ reinicia para empezar a pedirla.
 | Quiero… | Documento |
 |---|---|
 | Instalarlo y empezar | [`docs/BIMNEMO_INSTALAR.md`](docs/BIMNEMO_INSTALAR.md) |
-| Actualizarlo | [`como_actualizar.md`](como_actualizar.md) |
+| Cómo se actualiza, y cómo publicar una versión | [`como_actualizar.md`](como_actualizar.md) |
 | Entender cómo está hecho | [`docs/BIMNEMO_ARQUITECTURA.md`](docs/BIMNEMO_ARQUITECTURA.md) |
 | La ventana de escritorio: por qué y cómo | [`docs/BIMNEMO_INTERFAZ_NATIVA.md`](docs/BIMNEMO_INTERFAZ_NATIVA.md) |
-| Mantenerlo: publicar, etiquetar, generar el instalador | [`como_actualizar_bimnemo.md`](como_actualizar_bimnemo.md) |
+| Generar el instalador de Windows | [`instalador_bimnemo.md`](instalador_bimnemo.md) |
 
 ## Licencia
 

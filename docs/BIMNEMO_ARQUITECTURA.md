@@ -1,8 +1,9 @@
 # BIMNEMO por dentro
 
 Para quien vaya a mantener o ampliar BIMNEMO. Si lo que quieres es usarlo,
-mira [`BIMNEMO_INSTALAR.md`](BIMNEMO_INSTALAR.md); si publicarlo,
-[`como_actualizar_bimnemo.md`](../como_actualizar_bimnemo.md).
+mira [`BIMNEMO_INSTALAR.md`](BIMNEMO_INSTALAR.md); si publicar una versión,
+[`como_actualizar.md`](../como_actualizar.md); si generar el instalador,
+[`instalador_bimnemo.md`](../instalador_bimnemo.md).
 
 ---
 

@@ -71,9 +71,10 @@ FICHEROS = (
     "uv.lock",
     "env.docker-compose-full",
     "lightrag.service.example",  # unidad de systemd, para servidores Linux
-    # El manual de quien publica BIMNEMO: cómo etiquetar, cómo subir a
-    # GitHub, cómo construir el instalador. No es para quien lo usa.
-    "como_actualizar_bimnemo.md",
+    # Cómo se construye el instalador: es para quien mantiene BIMNEMO, no
+    # para quien lo usa. (`como_actualizar.md` sí viaja: lo abre el acceso
+    # «Cómo actualizar» del menú Inicio.)
+    "instalador_bimnemo.md",
 )
 
 #: Por dónde empiezan los ficheros de Docker y los de dependencias fijadas.
