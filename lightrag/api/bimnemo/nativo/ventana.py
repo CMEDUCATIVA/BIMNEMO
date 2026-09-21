@@ -11,6 +11,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lightrag.api.bimnemo.nativo import actualizar, formato, iconos, tema
+from lightrag.api.bimnemo.nativo import actualizar, formato, iconos, rueda, tema
 from lightrag.api.bimnemo.nativo.barra import BarraSuperior
 from lightrag.api.bimnemo.nativo.bienvenida import Bienvenida
 from lightrag.api.bimnemo.nativo.memorias import Memorias, ajustes
@@ -88,6 +89,9 @@ class Ventana(QMainWindow):
         tema.usar(self.paleta)
 
         self.memorias = Memorias(motor, self)
+
+        # La rueda del ratón desplaza la página y no cambia los selectores.
+        rueda.instalar(QApplication.instance())
 
         self.setWindowTitle("BIMNEMO — Memoria de conocimiento")
         self.setWindowIcon(iconos.de_la_aplicacion())
