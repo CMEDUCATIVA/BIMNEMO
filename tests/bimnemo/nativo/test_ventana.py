@@ -68,12 +68,16 @@ def test_el_contador_no_se_come_el_clic(ventana):
 # --- Barra superior ---------------------------------------------------------
 
 
-def test_el_selector_marca_la_memoria_por_defecto(ventana):
-    """El punto dice cuál se abre al arrancar. En la web no lo explicaba nadie."""
+def test_el_selector_muestra_solo_el_nombre(ventana):
+    """Sin el `·` detrás: se leía como parte del nombre de la memoria."""
+    from PySide6.QtCore import Qt
+
     barra = ventana.barra
     rotulos = [barra.selector.itemText(i) for i in range(barra.selector.count())]
-    assert rotulos == ["General ·", "Obra Sur"]
-    assert barra.selector.currentText() == "General ·"
+    assert rotulos == ["General", "Obra Sur"]
+    assert barra.selector.currentText() == "General"
+    # Cuál se abre al arrancar lo sigue diciendo el rótulo emergente.
+    assert "por defecto" in barra.selector.itemData(0, Qt.ToolTipRole)
 
 
 def test_cambiar_de_memoria_en_el_selector_cambia_la_del_motor(ventana):

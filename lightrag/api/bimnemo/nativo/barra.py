@@ -186,25 +186,19 @@ class BarraSuperior(QFrame):
     def pintar_selector(self) -> None:
         """Rehace la lista de memorias dejando marcada la abierta.
 
-        El punto `·` marca la de por defecto —la que se abre al arrancar—, y
-        lo dice su rótulo emergente: se veía en la web y no lo explicaba
-        nadie.
+        Solo el nombre. Antes la de por defecto llevaba un `·` detrás, que en
+        el selector se leía como parte del nombre. Cuál es la de por defecto
+        lo sigue diciendo su rótulo emergente, que es donde se busca.
         """
         self.selector.blockSignals(True)
         self.selector.clear()
         for nemo in self.memorias.nemos:
             identificador = str(nemo.get("id", ""))
-            es_defecto = identificador == self.memorias.por_defecto
-            self.selector.addItem(
-                f"{nemo.get('name', '')} ·"
-                if es_defecto
-                else str(nemo.get("name", "")),
-                identificador,
-            )
-            if es_defecto:
+            self.selector.addItem(str(nemo.get("name", "")), identificador)
+            if identificador == self.memorias.por_defecto:
                 self.selector.setItemData(
                     self.selector.count() - 1,
-                    "· Es la memoria por defecto: la que se abre al arrancar",
+                    "Es la memoria por defecto: la que se abre al arrancar",
                     Qt.ToolTipRole,
                 )
         # Sin ninguna memoria —instalación nueva, o después de borrar la
