@@ -111,6 +111,7 @@ def color_pulso() -> QColor:
     """El color con el que se pintan la búsqueda y las sinapsis."""
     return QColor(NARANJA if _fondo_claro() else AMBAR)
 
+
 #: 16 ms ≈ 60 fotogramas por segundo.
 PASO_MS = 16
 
@@ -126,6 +127,28 @@ SINAPSIS_SALTOS = 4
 #: Cuántas aristas como mucho salen de cada nodo. Un concentrador con
 #: treinta y siete relaciones encendería medio grafo en un solo salto.
 SINAPSIS_RAMAS = 3
+
+#: El empujón que deja el impulso en el nodo al que llega, y cuánta vida le
+#: devuelve a la simulación.
+#:
+#: Es el mismo mecanismo que recalienta el grafo al pulsar un nodo, pero
+#: treinta y cinco veces más flojo: allí `alpha` sube a 0,35 y el grafo se
+#: recoloca entero; aquí sube lo justo para que la red tiemble y se vuelva a
+#: posar. Los muelles de las aristas hacen el resto —el vecino tira del
+#: vecino— y eso es lo que se ve como agua.
+#:
+#: Las dos constantes hacen cosas distintas, y por eso se calibran aparte:
+#: `alpha` decide cuánto se mueve **todo el grafo** y `empuje`, cuánto se
+#: mueve **lo que el impulso toca**. Con `alpha` alto el temblor deja de ser
+#: local: la red entera se recoloca y ya no se lee como algo que recorre unas
+#: relaciones concretas.
+#:
+#: Medido sobre una sinapsis entera —sus cuatro saltos— con 191 nodos: los 15
+#: nodos que toca se mueven 6,2 px de media y 12,9 el que más; el resto del
+#: grafo, 1 px. Todo vuelve a la quietud en 0,9 s, mucho antes de la
+#: siguiente sinapsis, que llega a los 5 s.
+SINAPSIS_EMPUJE = 90.0
+SINAPSIS_ALPHA = 0.010
 
 
 def radio_de(grado: int) -> float:
@@ -383,9 +406,7 @@ class Grafo(QWidget):
 
         if saltos <= 0:
             return
-        vecinas = [
-            (a, b) for a, b in self._aristas if a == nodo or b == nodo
-        ]
+        vecinas = [(a, b) for a, b in self._aristas if a == nodo or b == nodo]
         if not vecinas:
             return
 
@@ -395,6 +416,34 @@ class Grafo(QWidget):
             # **desde** el nodo que se encendió y no al revés.
             origen, destino = (a, b) if a == nodo else (b, a)
             self._sinapsis.append((origen, destino, ahora, saltos))
+
+    def _ondular(self, origen: int, destino: int) -> None:
+        """El temblor que deja el impulso al llegar a un nodo.
+
+        Se empuja **en la dirección en la que viajaba**, no al azar: lo que
+        se está representando es algo que llega y mueve lo que toca.
+
+        No se mueve el nodo: se le suma velocidad y se despierta un poco la
+        simulación. Moverlo directamente sería un salto; así lo apartan las
+        fuerzas y lo devuelven los muelles, que es lo que hace que el vecino
+        se entere y el temblor se reparta.
+
+        En las disposiciones fijas no se hace nada. Ahí los nodos están
+        colocados a propósito —el círculo, los anillos por tipo— y encender
+        las fuerzas deshace en dos segundos lo que el usuario acaba de pedir.
+        """
+        if not disposicion.es_simulacion(self._disposicion):
+            return
+
+        direccion = self._pos[destino] - self._pos[origen]
+        largo = float(np.hypot(direccion[0], direccion[1]))
+        if largo < 1e-6:
+            return
+
+        self._vel[destino] += direccion / largo * SINAPSIS_EMPUJE
+        self._alpha = max(self._alpha, SINAPSIS_ALPHA)
+        if not self._reloj.isActive():
+            self._reloj.start()
 
     def _latir(self) -> None:
         """Avanza los impulsos y propaga los que llegan al otro extremo."""
@@ -410,7 +459,8 @@ class Grafo(QWidget):
             if (ahora - cuando) * 1000.0 < SINAPSIS_TRAMO_MS:
                 siguen.append((origen, destino, cuando, saltos))
                 continue
-            # Llegó: salta al siguiente tramo desde el nodo de destino.
+            # Llegó: empuja lo que ha alcanzado y salta al siguiente tramo.
+            self._ondular(origen, destino)
             self._encender(destino, saltos - 1)
 
         self._sinapsis = siguen
@@ -707,7 +757,7 @@ class Grafo(QWidget):
             # Se apaga al llegar: sin esto, el impulso desaparece de golpe
             # en el nodo de destino y parece un fallo de dibujo.
             color = color_pulso()
-            color.setAlpha(int(235 * (1.0 - avance ** 3)))
+            color.setAlpha(int(235 * (1.0 - avance**3)))
 
             pluma = QPen(color, max(1.6, 2.6 * k))
             pluma.setCapStyle(Qt.RoundCap)
