@@ -32,6 +32,7 @@ from PySide6.QtGui import (
     QFont,
     QMouseEvent,
     QPainter,
+    QPainterPath,
     QPen,
     QWheelEvent,
 )
@@ -389,7 +390,22 @@ class Grafo(QWidget):
     def paintEvent(self, _evento) -> None:  # noqa: N802 (nombre de Qt)
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.Antialiasing)
-        pintor.fillRect(self.rect(), QColor("#020617"))
+        # Redondeado arriba y recto abajo: abajo va pegado al pie, dentro del
+        # mismo marco. Pintando un rectángulo a sangre, el lienzo se comía
+        # las esquinas de la caja y parecía salirse de ella.
+        fondo = QPainterPath()
+        radio = 7.0
+        caja = QRectF(self.rect())
+        fondo.moveTo(caja.left(), caja.bottom())
+        fondo.lineTo(caja.left(), caja.top() + radio)
+        fondo.quadTo(caja.left(), caja.top(), caja.left() + radio, caja.top())
+        fondo.lineTo(caja.right() - radio, caja.top())
+        fondo.quadTo(caja.right(), caja.top(), caja.right(), caja.top() + radio)
+        fondo.lineTo(caja.right(), caja.bottom())
+        fondo.closeSubpath()
+        pintor.fillPath(fondo, QColor("#020617"))
+        # Todo lo demás se recorta a ese fondo: ni un nodo fuera de la caja.
+        pintor.setClipPath(fondo)
 
         if not self._nodos:
             pintor.setPen(QColor("#94a3b8"))

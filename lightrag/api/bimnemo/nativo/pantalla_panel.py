@@ -58,25 +58,19 @@ PROFUNDIDADES = ((1, "1 salto"), (2, "2 saltos"), (3, "3 saltos"),
 TOPES = (100, 250, 500, 1000)
 TOPE_POR_DEFECTO = 250
 
-#: Las cifras del panel: icono y rótulo de cada dato.
-CIFRAS = {
-    "archivos": ("ficheros", "Archivos"),
-    "tamano": ("disco", "Almacenado"),
-    "documentos": ("documento", "Documentos"),
-    "trozos": ("trozos", "Trozos"),
-    "entidades": ("entidades", "Entidades"),
-    "relaciones": ("relaciones", "Relaciones"),
-}
-
-#: Cómo se agrupan. Son tres preguntas distintas —qué ocupa, qué entendió el
-#: motor y qué dibuja el grafo— y en una lista seguida de seis números nadie
-#: distingue cuál responde a cuál.
-BLOQUES_DE_CIFRAS = (
-    ("Almacenamiento", ("archivos", "tamano")),
-    ("En memoria", ("documentos", "trozos")),
-    ("Grafo", ("entidades", "relaciones")),
+#: Las cuatro tarjetas del panel, las mismas que la web y en su orden.
+#: Cada una: clave, icono y rótulo.
+#:
+#: Las tres primeras suman **todas** las memorias, que es lo que se pide al
+#: mirar «en general». La cuarta es la excepción y lo dice en su rótulo: los
+#: documentos indexados son los de la memoria abierta, porque contar los de
+#: una dormida obligaría a abrirla — seis grafos en RAM por pintar una cifra.
+CIFRAS = (
+    ("archivos", "ficheros", "Archivos"),
+    ("almacenado", "disco", "Total almacenado"),
+    ("categorias", "trozos", "Categorías"),
+    ("memoria", "documento", "En esta memoria"),
 )
-
 
 #: Ancho de la ficha dentro del lienzo, y su separación del borde.
 ANCHO_FICHA = 286
@@ -189,51 +183,69 @@ class Ficha(QFrame):
         self.hide()
 
     def recolocar(self) -> None:
-        """Arriba a la derecha del lienzo, sin salirse nunca."""
+        """Arriba a la derecha del lienzo, sin salirse ni taparlo entero."""
         padre = self.parentWidget()
         if padre is None:
             return
+
+        # Se encoge con el lienzo: con la ventana estrecha, una ficha de 286
+        # píxeles fijos tapaba casi la mitad del grafo, y la gracia de tenerla
+        # dentro es poder mirar las dos cosas a la vez.
+        ancho = max(200, min(ANCHO_FICHA, int(padre.width() * 0.42)))
+        self.setFixedWidth(ancho)
+
         alto = min(
             max(self.sizeHint().height(), 120),
             max(padre.height() - 2 * MARGEN_FICHA, 120),
         )
         self.setFixedHeight(alto)
-        self.move(padre.width() - ANCHO_FICHA - MARGEN_FICHA, MARGEN_FICHA)
+        self.move(padre.width() - ancho - MARGEN_FICHA, MARGEN_FICHA)
 
 
-class Cifra(QWidget):
-    """Un icono, un número grande y su rótulo."""
+class Cifra(QFrame):
+    """Una tarjeta de cifra, la misma que las del panel web.
+
+    Icono y rótulo en mayúsculas arriba, el número grande en medio y una
+    nota debajo. La nota no es adorno: «5,4 MB» a secas no dice si son los
+    bytes en disco o lo indexado, y «2 / 8» sin «en uso sobre el catálogo»
+    no se entiende en absoluto.
+    """
 
     def __init__(self, icono_nombre: str, rotulo: str) -> None:
         super().__init__()
-        self.setObjectName("fila")
+        self.setObjectName("cifra-tarjeta")
 
-        fila = QHBoxLayout(self)
+        columna = QVBoxLayout(self)
+        columna.setContentsMargins(16, 14, 16, 14)
+        columna.setSpacing(2)
+
+        cabecera = QWidget()
+        cabecera.setObjectName("fila")
+        fila = QHBoxLayout(cabecera)
         fila.setContentsMargins(0, 0, 0, 0)
-        fila.setSpacing(10)
+        fila.setSpacing(7)
 
         marca = QLabel()
-        marca.setPixmap(iconos.pixmap(icono_nombre, 20, "#3b82f6"))
-        marca.setFixedWidth(22)
-        marca.setAlignment(Qt.AlignTop)
+        marca.setPixmap(iconos.pixmap(icono_nombre, 14, "#3b82f6"))
         fila.addWidget(marca)
 
-        columna = QVBoxLayout()
-        columna.setContentsMargins(0, 0, 0, 0)
-        columna.setSpacing(0)
+        etiqueta = QLabel(rotulo.upper())
+        etiqueta.setObjectName("cifra-rotulo")
+        fila.addWidget(etiqueta, 1)
+        columna.addWidget(cabecera)
 
         self.valor = QLabel("…")
         self.valor.setObjectName("cifra")
         columna.addWidget(self.valor)
 
-        etiqueta = QLabel(rotulo)
-        etiqueta.setObjectName("descripcion")
-        columna.addWidget(etiqueta)
+        self.nota = QLabel("")
+        self.nota.setObjectName("cifra-nota")
+        self.nota.setWordWrap(True)
+        columna.addWidget(self.nota)
 
-        fila.addLayout(columna, 1)
-
-    def poner(self, texto: str) -> None:
-        self.valor.setText(texto)
+    def poner(self, valor: str, nota: str = "") -> None:
+        self.valor.setText(valor)
+        self.nota.setText(nota)
 
 
 def _boton_icono(nombre: str, pista: str) -> QPushButton:
@@ -313,12 +325,16 @@ class PantallaPanel(QWidget):
             self.rejilla.setColumnStretch(0, 1)
             self.rejilla.setColumnStretch(1, 0)
             self.columna_datos.setMaximumWidth(16777215)
+            # Apiladas, las tarjetas se reparten a lo ancho en vez de
+            # estirarse una debajo de otra.
+            self._repartir_cifras(4)
         else:
             self.rejilla.addWidget(self.columna_grafo, 0, 0)
             self.rejilla.addWidget(self.columna_datos, 0, 1)
             self.rejilla.setColumnStretch(0, 1)
             self.rejilla.setColumnStretch(1, 0)
             self.columna_datos.setFixedWidth(ANCHO_DATOS)
+            self._repartir_cifras(1)
 
         self.columna_grafo.show()
         self.columna_datos.show()
@@ -354,10 +370,23 @@ class PantallaPanel(QWidget):
 
         tarjeta.anadir(self._barra())
 
+        # El lienzo y su pie van dentro de UN marco con esquinas
+        # redondeadas. Sueltos en la tarjeta, el lienzo pintaba hasta el
+        # borde recto y se salía de las esquinas de la tarjeta, y el pie
+        # quedaba debajo como algo aparte.
+        self.caja_lienzo = QFrame()
+        self.caja_lienzo.setObjectName("caja-grafo")
+        caja = QVBoxLayout(self.caja_lienzo)
+        caja.setContentsMargins(1, 1, 1, 1)
+        caja.setSpacing(0)
+
         self.grafo = Grafo()
         self.grafo.elegido.connect(self._pintar_detalle)
         self.grafo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        tarjeta.anadir(self.grafo)
+        caja.addWidget(self.grafo, 1)
+        caja.addWidget(self._pie())
+
+        tarjeta.anadir(self.caja_lienzo)
 
         # La ficha vive **dentro** del lienzo, pegada a su lado derecho: es
         # hija del grafo, no una tarjeta más de la columna. Así se lee sin
@@ -366,7 +395,6 @@ class PantallaPanel(QWidget):
         self.ficha.cerrada.connect(self._soltar_seleccion)
         self.grafo.installEventFilter(self)
 
-        tarjeta.anadir(self._pie())
         return tarjeta
 
     def _pie(self) -> QWidget:
@@ -489,55 +517,110 @@ class PantallaPanel(QWidget):
 
         dentro = QWidget()
         dentro.setObjectName("fila")
-        columna = QVBoxLayout(dentro)
-        columna.setContentsMargins(0, 0, 8, 0)
-        columna.setSpacing(16)
+        # Rejilla y no columna: apiladas, las cuatro tarjetas en una sola
+        # columna salían larguísimas y sin forma. En rejilla se reparten en
+        # las columnas que quepan y conservan su proporción.
+        self.rejilla_cifras = QGridLayout(dentro)
+        self.rejilla_cifras.setContentsMargins(0, 0, 8, 0)
+        self.rejilla_cifras.setHorizontalSpacing(12)
+        self.rejilla_cifras.setVerticalSpacing(12)
 
-        # Tres bloques y no uno: «lo que ocupa en disco», «lo que el motor
-        # entendió» y «lo que dibuja el grafo» son tres cosas distintas, y en
-        # una lista seguida de seis números nadie distingue cuál es cuál.
         self.cifras: dict[str, Cifra] = {}
-        for titulo, claves in BLOQUES_DE_CIFRAS:
-            tarjeta = Tarjeta(titulo)
-            for clave in claves:
-                icono_nombre, rotulo = CIFRAS[clave]
-                pieza = Cifra(icono_nombre, rotulo)
-                self.cifras[clave] = pieza
-                tarjeta.anadir(pieza)
-            columna.addWidget(tarjeta)
+        for clave, icono_nombre, rotulo in CIFRAS:
+            self.cifras[clave] = Cifra(icono_nombre, rotulo)
 
-        columna.addStretch(1)
+        self._columnas_cifras = 0
+        self._repartir_cifras(1)
+
         envoltorio.setWidget(dentro)
         return envoltorio
+
+    def _repartir_cifras(self, columnas: int) -> None:
+        """Coloca las cuatro tarjetas en el número de columnas que se pida."""
+        if columnas == self._columnas_cifras:
+            return
+        self._columnas_cifras = columnas
+
+        for pieza in self.cifras.values():
+            self.rejilla_cifras.removeWidget(pieza)
+
+        for puesto, clave in enumerate(c for c, _i, _r in CIFRAS):
+            self.rejilla_cifras.addWidget(
+                self.cifras[clave], puesto // columnas, puesto % columnas
+            )
+            self.cifras[clave].show()
+
+        for columna in range(4):
+            self.rejilla_cifras.setColumnStretch(
+                columna, 1 if columna < columnas else 0
+            )
+        # Sin esto, apiladas, la última fila se estira hasta el borde y deja
+        # tarjetas de trescientos píxeles de alto.
+        self.rejilla_cifras.setRowStretch(
+            (len(CIFRAS) - 1) // columnas + 1, 1
+        )
 
     # -- datos --------------------------------------------------------------
 
     def refrescar(self) -> None:
         self.motor.get("/bimnemo/stats", self._pintar_cifras, self._fallo)
+        self.motor.get("/bimnemo/nemos/stats", self._pintar_agregado, None)
         self.motor.get("/bimnemo/stats/graph", self._pintar_grafo_cifras, None)
         self._cargar_grafo()
 
     def _pintar_cifras(self, datos: Any) -> None:
+        """Lo de ESTA memoria: la cuarta tarjeta."""
         if not isinstance(datos, dict):
             return
         self.aviso.callar()
-        almacen = datos.get("storage") or {}
         memoria = datos.get("memory") or {}
 
-        self.cifras["archivos"].poner(formato.numero(almacen.get("total_files")))
-        self.cifras["tamano"].poner(formato.tamano(almacen.get("total_bytes")))
-        self.cifras["documentos"].poner(formato.numero(memoria.get("total_documents")))
-        self.cifras["trozos"].poner(formato.numero(memoria.get("total_chunks")))
+        self.cifras["memoria"].poner(
+            formato.numero(memoria.get("total_documents")),
+            f"{formato.numero(memoria.get('total_chunks'))} fragmentos "
+            "indexados",
+        )
 
         fallo = memoria.get("documents_error") or memoria.get("failed_reason")
         if fallo:
             self.aviso.fallar(str(fallo))
 
-    def _pintar_grafo_cifras(self, datos: Any) -> None:
+    def _pintar_agregado(self, datos: Any) -> None:
+        """Lo de TODAS las memorias: las tres primeras tarjetas.
+
+        Se suman todas porque es lo que se busca al mirar «en general». La
+        cuarta no puede sumarse y por eso va aparte: contar los documentos
+        indexados de una memoria dormida obligaría a abrirla.
+        """
         if not isinstance(datos, dict):
             return
-        self.cifras["entidades"].poner(formato.numero(datos.get("entities")))
-        self.cifras["relaciones"].poner(formato.numero(datos.get("relations")))
+        total = datos.get("total") or {}
+        cuantas = int(total.get("nemos") or 0)
+
+        self.cifras["archivos"].poner(
+            formato.numero(total.get("total_files")),
+            f"En {cuantas} memoria" + ("" if cuantas == 1 else "s"),
+        )
+        self.cifras["almacenado"].poner(
+            formato.tamano(total.get("total_bytes")), "Bytes reales en disco"
+        )
+
+        categorias = total.get("categories") or []
+        en_uso = sum(1 for c in categorias if (c.get("files") or 0) > 0)
+        self.cifras["categorias"].poner(
+            f"{en_uso} / {len(categorias)}", "En uso sobre el catálogo"
+        )
+
+    def _pintar_grafo_cifras(self, datos: Any) -> None:
+        """El total del grafo, al lado del título.
+
+        No lleva tarjeta propia: lo que el grafo dibuja ya se dice en su
+        cabecera, y una tarjeta con el total del grafo al lado de otra con
+        lo que se está viendo invita a compararlas y a confundirse.
+        """
+        if not isinstance(datos, dict):
+            return
+        self._total_grafo = (datos.get("entities"), datos.get("relations"))
 
     def _cargar_grafo(self) -> None:
         etiqueta = self.entidad.currentData() or "*"

@@ -28,7 +28,7 @@ from time import monotonic
 from typing import Any, Optional
 from urllib.parse import quote
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -80,6 +80,11 @@ PACIENCIA = 20.0
 
 
 class PantallaArchivos(Pantalla):
+    #: Cuántos ficheros hay en esta memoria. Lo escucha la ventana para el
+    #: contador del carril; se emite solo cuando el número cambia, que es
+    #: mucho menos que cada repintado.
+    cuenta = Signal(int)
+
     def __init__(self, motor: Motor) -> None:
         super().__init__(
             "Archivos",
@@ -106,6 +111,7 @@ class PantallaArchivos(Pantalla):
         self._avance: dict[str, Any] = {}
         self._parado_desde: Optional[float] = None
         self._sello: Optional[str] = None
+        self._ultima_cuenta: Optional[int] = None
         #: Las barras vivas, por nombre de fichero, para poder moverlas sin
         #: repintar la tabla entera.
         self._barras: dict[str, tuple[QProgressBar, QLabel]] = {}
@@ -134,17 +140,19 @@ class PantallaArchivos(Pantalla):
     # -- estructura ---------------------------------------------------------
 
     def _acciones(self) -> QWidget:
+        """Los dos botones de la cabecera.
+
+        No hay «Actualizar»: el vigilante mira cada dos o seis segundos y
+        vuelve a pedir la lista en cuanto el sello del motor cambia. Un botón
+        que solo puede adelantar unos segundos lo que va a pasar solo invita
+        a pulsarlo cuando algo parece atascado —y ahí no arregla nada.
+        """
         fila = QWidget()
         fila.setObjectName("fila")
         caja = QHBoxLayout(fila)
         caja.setContentsMargins(0, 0, 0, 0)
         caja.setSpacing(10)
         caja.addStretch(1)
-
-        actualizar = QPushButton("Actualizar")
-        actualizar.setCursor(Qt.PointingHandCursor)
-        actualizar.clicked.connect(self.refrescar)
-        caja.addWidget(actualizar)
 
         self.boton_reindexar = QPushButton("Reindexar pendientes")
         self.boton_reindexar.setIcon(iconos.icono("recargar", 14, tema.ACTUAL.texto_2))
@@ -346,6 +354,10 @@ class PantallaArchivos(Pantalla):
 
         pista = f"{formato.numero(len(visibles))} de {formato.numero(total)}"
         self.pista.setText(f"{self._memoria} · {pista}" if self._memoria else pista)
+
+        if total != self._ultima_cuenta:
+            self._ultima_cuenta = total
+            self.cuenta.emit(total)
 
         self._barras.clear()
         self.tabla.setRowCount(len(visibles))

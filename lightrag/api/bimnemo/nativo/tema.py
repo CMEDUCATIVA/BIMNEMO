@@ -215,6 +215,12 @@ def hoja(p: Paleta) -> str:
         color: {p.azul};
         font-weight: 600;
     }}
+    /* El contador del carril: a la derecha del rótulo y en gris. Es un
+       dato de apoyo, no compite con el nombre de la pantalla. */
+    #nav-cuenta {{
+        color: {p.texto_3};
+        font-size: 11px;
+    }}
     #version {{
         color: {p.texto_3};
         font-size: 11px;
@@ -372,6 +378,26 @@ def hoja(p: Paleta) -> str:
 
     /* El pie del grafo: leyenda y ayuda. Con fondo y un borde arriba para
        que se lea como pie y no como algo flotando sobre el lienzo. */
+    #caja-grafo {{
+        background: {p.fondo};
+        border: 1px solid {p.borde};
+        border-radius: 8px;
+    }}
+    #cifra-tarjeta {{
+        background: {p.elevada};
+        border: 1px solid {p.borde};
+        border-radius: 10px;
+    }}
+    #cifra-rotulo {{
+        color: {p.azul};
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+    }}
+    #cifra-nota {{
+        color: {p.texto_3};
+        font-size: 11px;
+    }}
     #pie-grafo {{
         background: {p.secundaria};
         border: none;

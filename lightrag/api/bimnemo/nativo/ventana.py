@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lightrag.api.bimnemo.nativo import iconos, tema
+from lightrag.api.bimnemo.nativo import formato, iconos, tema
 from lightrag.api.bimnemo.nativo.motor import Motor
 
 #: Las pantallas, en el orden en que salen. El segundo valor es la etapa del
@@ -169,7 +169,15 @@ class Ventana(QMainWindow):
         from lightrag.api.bimnemo.nativo.pantalla_panel import PantallaPanel
 
         self.registrar_pantalla("Panel", PantallaPanel(self.motor))
-        self.registrar_pantalla("Archivos", PantallaArchivos(self.motor))
+
+        archivos = PantallaArchivos(self.motor)
+        # Una raya hasta que el motor conteste: un cero mientras se carga se
+        # lee como «esta memoria está vacía», que es otra cosa.
+        self.poner_cuenta("Archivos", "—")
+        archivos.cuenta.connect(
+            lambda cuantos: self.poner_cuenta("Archivos", formato.numero(cuantos))
+        )
+        self.registrar_pantalla("Archivos", archivos)
         self.registrar_pantalla("Chat", PantallaChat(self.motor))
         self.registrar_pantalla("Motor", PantallaMotor(self.motor))
         self.registrar_pantalla(
@@ -230,6 +238,9 @@ class Ventana(QMainWindow):
         self._grupo = QButtonGroup(self)
         self._grupo.setExclusive(True)
         self._botones: list[QPushButton] = []
+        #: Los contadores del carril, por pantalla. Solo los rellena quien
+        #: tiene algo que contar.
+        self._cuentas: dict[str, QLabel] = {}
 
         for indice, (nombre, icono_nombre) in enumerate(PANTALLAS):
             boton = QPushButton(nombre)
@@ -242,6 +253,7 @@ class Ventana(QMainWindow):
             )
             self._grupo.addButton(boton, indice)
             self._botones.append(boton)
+            self._cuentas[nombre] = self._contador(boton)
 
             envoltorio = QHBoxLayout()
             envoltorio.setContentsMargins(8, 0, 8, 0)
@@ -255,6 +267,30 @@ class Ventana(QMainWindow):
         etiqueta.setObjectName("version")
         columna.addWidget(etiqueta)
         return lateral
+
+    @staticmethod
+    def _contador(boton: QPushButton) -> QLabel:
+        """El número que va a la derecha del rótulo, dentro del botón.
+
+        Dentro y no al lado: fuera del botón, la mitad derecha del carril
+        dejaría de encenderse al pasar el ratón y de responder al clic. La
+        etiqueta deja pasar el ratón para que el botón siga siendo uno solo.
+        """
+        etiqueta = QLabel("")
+        etiqueta.setObjectName("nav-cuenta")
+        etiqueta.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        caja = QHBoxLayout(boton)
+        caja.setContentsMargins(0, 0, 12, 0)
+        caja.addStretch(1)
+        caja.addWidget(etiqueta)
+        return etiqueta
+
+    def poner_cuenta(self, nombre: str, texto: str) -> None:
+        """Escribe el contador de una pantalla en el carril."""
+        etiqueta = self._cuentas.get(nombre)
+        if etiqueta is not None:
+            etiqueta.setText(texto)
 
     def registrar_pantalla(self, nombre: str, widget: QWidget) -> None:
         """Mete una pantalla en su sitio.
