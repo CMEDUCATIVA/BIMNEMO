@@ -62,10 +62,22 @@ def _git_ls_files() -> list[str]:
     return [linea for linea in proc.stdout.splitlines() if linea.strip()]
 
 
+def _sobra_en_cliente(relativo: str) -> bool:
+    """La lista vive en el programa, no aquí: la comparte el actualizador."""
+    sys.path.insert(0, str(RAIZ))
+    from lightrag.api.bimnemo.reparto import sobra_en_cliente
+
+    return sobra_en_cliente(relativo)
+
+
 def _copiar_programa() -> int:
     copiados = 0
+    descartados = 0
     for relativo in _git_ls_files():
         if relativo in EXCLUIDOS_SIEMPRE:
+            continue
+        if _sobra_en_cliente(relativo):
+            descartados += 1
             continue
         origen = RAIZ / relativo
         if not origen.is_file():
@@ -74,6 +86,8 @@ def _copiar_programa() -> int:
         destino.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(origen, destino)
         copiados += 1
+    if descartados:
+        print(f"  de desarrollo     {descartados} ficheros fuera del paquete")
     return copiados
 
 
@@ -112,8 +126,29 @@ RUTAS_PORTABLES = """.
 import site
 """
 
+#: Con qué cara se presenta BIMNEMO en Windows.
+#:
+#: Un intérprete de Python se presenta como lo que es: `pythonw.exe`, icono
+#: de Python, descripción «Python». Quien usa BIMNEMO no puede reconocer eso
+#: como suyo, y si algo se queda colgado no sabe ni qué cerrar.
+#:
+#: Son **copias**, no renombrados, porque `python.exe` sigue haciendo falta:
+#: es el que usa `pip` cuando una actualización trae dependencias nuevas
+#: (ver `python_del_entorno` en `bimnemo/paquete.py`).
+CARAS = (
+    ("pythonw.exe", "bimnemo.exe", "BIMNEMO"),
+    ("python.exe", "bimnemo-consola.exe", "BIMNEMO (diagnóstico)"),
+)
 
-def _copiar_entorno() -> None:
+#: Python busca su fichero de rutas por el **nombre del ejecutable**: para
+#: `bimnemo.exe` busca `bimnemo._pth`. Sin él, el intérprete copiado pierde
+#: el modo aislado, se va a buscar una instalación del sistema y el programa
+#: no arranca en un ordenador que no tenga Python. Se escribe uno por cada
+#: nombre y así no hay que acordarse.
+NOMBRES_PTH = ("python", "pythonw", "bimnemo", "bimnemo-consola")
+
+
+def _copiar_entorno(version: str) -> None:
     """Monta un **Python portable** dentro del paquete.
 
     El entorno de desarrollo es un `venv`, y un `venv` de Windows **no lleva
@@ -160,15 +195,239 @@ def _copiar_entorno() -> None:
     shutil.copytree(
         venv_paquetes,
         destino / "Lib" / "site-packages",
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        ignore=_ignorar_al_copiar,
         dirs_exist_ok=True,
     )
     _quitar_enlace_editable(destino / "Lib" / "site-packages")
+    _podar_qt(destino / "Lib" / "site-packages" / "PySide6")
 
     # 4. Lo que lo hace portable.
-    (destino / "python._pth").write_text(RUTAS_PORTABLES, encoding="utf-8")
+    for nombre in NOMBRES_PTH:
+        (destino / f"{nombre}._pth").write_text(RUTAS_PORTABLES, encoding="utf-8")
 
     print("  Python portable   intérprete, DLLs, biblioteca y dependencias")
+
+    # 5. Y que no se presente como Python, sino como BIMNEMO.
+    _poner_cara(destino, version)
+
+
+#: Rutas del `._pth` cuando el ejecutable está en la **raíz** de la
+#: instalación y el intérprete una carpeta más abajo.
+RUTAS_DESDE_LA_RAIZ = """python
+python\\DLLs
+python\\Lib
+python\\Lib\\site-packages
+.
+import site
+"""
+
+#: Lo que hay que copiar junto a un ejecutable de Python para que funcione
+#: fuera de la carpeta del intérprete.
+#:
+#: Sin esto arranca **igual de bien en esta máquina y solo en esta**: Windows
+#: no encuentra `python314.dll` al lado del ejecutable, se va a buscarla por
+#: el PATH y da con la del Python del sistema. Comprobado: cargaba
+#: `C:\\Python314\\python314.dll`. En un ordenador sin Python no arrancaría.
+DLLS_DEL_INTERPRETE = (
+    "python314.dll",
+    "python3.dll",
+    "vcruntime140.dll",
+    "vcruntime140_1.dll",
+)
+
+
+def _poner_cara(destino: Path, version: str) -> None:
+    """Deja el intérprete llamándose BIMNEMO, con su icono y su descripción."""
+    import icono
+    import sellar
+
+    ico = icono.generar()
+
+    for original, nuevo, descripcion in CARAS:
+        shutil.copy2(destino / original, destino / nuevo)
+        sellar.sellar(destino / nuevo, ico, version, descripcion)
+
+    nombres = ", ".join(nuevo for _o, nuevo, _d in CARAS)
+    print(f"  identidad         {nombres}, con icono y descripción")
+
+    _puerta_de_entrada(destino, ico, version)
+
+
+def _puerta_de_entrada(interprete: Path, ico: Path, version: str) -> None:
+    """Saca `bimnemo.exe` a la raíz de la instalación.
+
+    Enterrado en `python\\` no lo ve nadie: quien abre la carpeta de BIMNEMO
+    se encuentra ficheros sueltos y carpetas, y ninguno se llama como el
+    programa. El ejecutable tiene que estar en la puerta.
+
+    Se copia el intérprete en vez de dejar un acceso directo porque un `.lnk`
+    no es un programa: no se puede ejecutar desde una consola, no aparece
+    igual en el Administrador de tareas y se rompe si alguien mueve la
+    carpeta.
+    """
+    import sellar
+
+    raiz = interprete.parent
+
+    shutil.copy2(interprete / "pythonw.exe", raiz / "bimnemo.exe")
+    (raiz / "bimnemo._pth").write_text(RUTAS_DESDE_LA_RAIZ, encoding="utf-8")
+    sellar.sellar(raiz / "bimnemo.exe", ico, version, "BIMNEMO")
+
+    for nombre in DLLS_DEL_INTERPRETE:
+        origen = interprete / nombre
+        if origen.is_file():
+            shutil.copy2(origen, raiz / nombre)
+
+    print("  puerta de entrada bimnemo.exe en la raíz, con su tiempo de ejecución")
+
+
+#: Lo que no hace falta de Qt para una aplicación de ventanas.
+#:
+#: `PySide6-Essentials` son 205 MB, y la mayor parte es el **otro** juego de
+#: interfaces de Qt —el declarativo, QML y Quick— más herramientas de
+#: desarrollo. BIMNEMO usa Widgets, que es el otro camino: nada de esto se
+#: importa nunca.
+SOBRA_DE_QT_CARPETAS = (
+    "qml",  # 19 MB del juego declarativo
+    "metatypes",  # descriptores para compilar contra Qt
+    "include",
+    "typesystems",
+    "scripts",
+    "examples",
+    "glue",
+)
+
+#: Módulos de Qt que no se usan, por el principio de su nombre. Se borran
+#: tanto la DLL como el `.pyd` que la enlaza con Python.
+SOBRA_DE_QT_MODULOS = (
+    "Qt6Quick",
+    "Qt6Qml",
+    "Qt6Designer",
+    "QtQuick",
+    "QtQml",
+    "QtDesigner",
+    "qmlls",
+    "qmlformat",
+    "qmllint",
+    "qmlsc",
+)
+
+#: Idiomas que se quedan. El resto de `translations/` son 13 MB de mensajes
+#: de Qt en idiomas que esta aplicación no ofrece.
+IDIOMAS_DE_QT = ("es", "en")
+
+#: Los módulos de Qt que la ventana **sí** importa. El resto de enlaces con
+#: Python (`.pyd`) se van: son el puente entre Python y una biblioteca que
+#: nadie llama, y `QtOpenGL.pyd` solo son 8,3 MB.
+#:
+#: Se filtran los `.pyd`, no las DLL de Qt: una DLL puede hacer falta aunque
+#: no se importe desde Python, porque otra DLL dependa de ella. El enlace con
+#: Python, en cambio, solo lo usa un `import`.
+MODULOS_DE_QT = (
+    "QtCore",
+    "QtGui",
+    "QtWidgets",
+    "QtNetwork",
+    "QtSvg",
+)
+
+#: Bibliotecas de Qt que en Windows no pinta nada llevarse.
+DLLS_DE_QT_QUE_SOBRAN = (
+    "Qt6DBus.dll",  # comunicación entre procesos de Linux
+    "Qt6LabsStyleKit.dll",  # del juego declarativo, ya podado
+)
+
+#: Complementos de Qt que no se usan. `sqldrivers` es el acceso a bases de
+#: datos desde Qt; BIMNEMO habla con su motor por HTTP.
+COMPLEMENTOS_QUE_SOBRAN = ("sqldrivers",)
+
+
+def _ignorar_al_copiar(directorio: str, nombres: list[str]) -> set[str]:
+    """Qué no se copia de `site-packages`, decidido **antes** de copiarlo.
+
+    Podría copiarse todo y borrar después, y era lo que hacía. No funciona:
+    dentro de `PySide6/qml` hay rutas que pasan del límite de 260 caracteres
+    de Windows y la copia se interrumpe con un error que no dice de qué va.
+    Además copia y borra 19 MB para nada.
+    """
+    fuera = {"__pycache__"}
+    for nombre in nombres:
+        if nombre.endswith((".pyc", ".pyo")):
+            fuera.add(nombre)
+
+    if "PySide6" in Path(directorio).parts:
+        for nombre in nombres:
+            if nombre in SOBRA_DE_QT_CARPETAS or nombre.startswith(
+                SOBRA_DE_QT_MODULOS
+            ):
+                fuera.add(nombre)
+    return fuera
+
+
+def _podar_qt(qt: Path) -> None:
+    """Quita de Qt lo que una aplicación de ventanas no usa.
+
+    **Ojo**: quitar de más no falla aquí, falla al arrancar en el ordenador
+    de un cliente. Por eso se poda por módulos enteros y separados —QML,
+    Quick, Designer— y no por ficheros sueltos, y por eso la construcción
+    termina comprobando que el paquete arranca fuera de su carpeta.
+
+    `opengl32sw.dll` son 19,7 MB y **se queda a propósito**: es el dibujado
+    por software, el que salva a las máquinas virtuales, los escritorios
+    remotos y los equipos sin controlador de vídeo. Quitarlo ahorra 20 MB y
+    deja la ventana en negro en el sitio menos oportuno.
+    """
+    if not qt.is_dir():
+        return
+
+    antes = sum(f.stat().st_size for f in qt.rglob("*") if f.is_file())
+
+    for nombre in SOBRA_DE_QT_CARPETAS:
+        carpeta = qt / nombre
+        if carpeta.is_dir():
+            shutil.rmtree(carpeta, ignore_errors=True)
+
+    for fichero in qt.iterdir():
+        if fichero.is_file() and fichero.name.startswith(SOBRA_DE_QT_MODULOS):
+            fichero.unlink()
+
+    # Anotaciones de tipo y herramientas de desarrollo: 11 MB que solo sirven
+    # para programar contra Qt, nunca para ejecutar.
+    for fichero in qt.rglob("*.pyi"):
+        fichero.unlink()
+    for fichero in qt.glob("*.exe"):
+        fichero.unlink()
+
+    for fichero in qt.glob("*.pyd"):
+        if fichero.stem not in MODULOS_DE_QT:
+            fichero.unlink()
+
+    for nombre in DLLS_DE_QT_QUE_SOBRAN:
+        fichero = qt / nombre
+        if fichero.is_file():
+            fichero.unlink()
+
+    for nombre in COMPLEMENTOS_QUE_SOBRAN:
+        carpeta = qt / "plugins" / nombre
+        if carpeta.is_dir():
+            shutil.rmtree(carpeta, ignore_errors=True)
+
+    traducciones = qt / "translations"
+    if traducciones.is_dir():
+        for fichero in traducciones.iterdir():
+            # `qtbase_es.qm` → el idioma va tras el primer guion bajo.
+            if fichero.is_file() and "_" in fichero.stem:
+                idioma = fichero.stem.split("_", 1)[1].split("_")[0]
+                if idioma not in IDIOMAS_DE_QT:
+                    fichero.unlink()
+
+    despues = sum(f.stat().st_size for f in qt.rglob("*") if f.is_file())
+    # Sin flechas ni adornos: la consola de Windows es cp1252 y un carácter
+    # fuera de esa tabla revienta el empaquetado entero por un mensaje.
+    print(
+        f"  Qt podado         de {antes / 1_048_576:.0f} MB "
+        f"a {despues / 1_048_576:.0f} MB"
+    )
 
 
 def _python_base() -> Path:
@@ -274,7 +533,7 @@ def main(argumentos: list[str]) -> int:
     print(f"  VERSION           {version}")
 
     print("  entorno virtual   copiando (tarda)…")
-    _copiar_entorno()
+    _copiar_entorno(version)
     _comprobar_sin_rutas_de_desarrollo()
 
     total = sum(f.stat().st_size for f in SALIDA.rglob("*") if f.is_file())

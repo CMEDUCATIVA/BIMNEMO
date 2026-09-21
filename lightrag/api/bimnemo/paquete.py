@@ -49,6 +49,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
+from lightrag.api.bimnemo.reparto import sobra_en_cliente
 from lightrag.utils import logger
 
 #: Cuánto se espera a GitHub. Generoso: aquí sí se descarga de verdad.
@@ -138,7 +139,16 @@ def desplegar(zip_path: Path, destino: Path) -> tuple[bool, str]:
                 return False, "El paquete no parece una versión de BIMNEMO."
 
             with tempfile.TemporaryDirectory(prefix="bimnemo-upd-") as tmp:
-                zf.extractall(tmp)
+                # Solo se extrae lo que le toca al cliente. El zip trae el
+                # repositorio entero —pruebas, despliegues de Kubernetes,
+                # ficheros de Docker— y sin este filtro la primera
+                # actualización volvería a llenar una carpeta que el
+                # instalador había dejado limpia.
+                miembros = [
+                    n for n in zf.namelist()
+                    if not sobra_en_cliente(n[len(raiz_zip) + 1 :])
+                ]
+                zf.extractall(tmp, members=miembros)
                 origen = Path(tmp) / raiz_zip
                 # `dirs_exist_ok` reemplaza fichero a fichero sin borrar antes:
                 # si algo falla a mitad, lo peor que queda es una instalación

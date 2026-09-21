@@ -29,7 +29,16 @@
 ; La ruta es `python\`, no `.venv\`: el paquete lleva un Python portable, no un
 ; entorno virtual — un venv de Windows no lleva intérprete dentro y dependería
 ; de que el cliente tuviera Python instalado.
-#define Ejecutable  "python\pythonw.exe"
+;
+; Y se llama `bimnemo.exe`, no `pythonw.exe`: es el mismo intérprete, sellado
+; con el icono y la descripción de BIMNEMO por `scripts\release\sellar.py`.
+; Así el Administrador de tareas dice «BIMNEMO» y no «Python», que es lo único
+; que el usuario tiene para reconocer su propio programa.
+;
+; Y está en la raíz, no dentro de `python\`: quien abre la carpeta de BIMNEMO
+; tiene que encontrarse el programa en la puerta, no enterrado dos niveles
+; abajo entre ficheros del intérprete.
+#define Ejecutable  "bimnemo.exe"
 #define Argumentos  "-m lightrag.api.bimnemo.desktop"
 
 ; La versión la inyecta el guion de construcción con /DVersion=...
@@ -58,10 +67,18 @@ DefaultDirName={code:DirPropuesto}
 ; mutex lo crea el lanzador (`marcar_en_marcha` en `desktop.py`); si se cambia
 ; el nombre aquí, hay que cambiarlo allí.
 AppMutex=BIMNEMO_EN_MARCHA
+
+; Deja un registro en la carpeta temporal en cada ejecución. Cuesta nada y es
+; la diferencia entre saber qué pasó y adivinarlo: sin esto, un instalador que
+; se porta raro en el ordenador de un cliente no deja nada que mirar.
+SetupLogging=yes
 DefaultGroupName={#Nombre}
 DisableProgramGroupPage=yes
 OutputDir=salida
 OutputBaseFilename=BIMNEMO-{#Version}-instalador
+; Para que el propio instalador se vea como BIMNEMO en la carpeta de descargas
+; y en el aviso de Windows, no como un ejecutable anónimo.
+SetupIconFile=bimnemo.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -95,9 +112,9 @@ Source: "salida\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cr
 Type: filesandordirs; Name: "{app}\.venv"; Check: not EsCopiaDeDesarrollo
 
 [Icons]
-; Sin `IconFilename`: los accesos directos toman el icono de `pythonw.exe`.
-; Feo, pero honesto — BIMNEMO todavía no tiene icono propio. Cuando lo tenga,
-; se deja en `installer\bimnemo.ico`, se añade a [Files] y se referencia aquí.
+; Sin `IconFilename`: el icono ya va **dentro** de `bimnemo.exe`, sellado al
+; empaquetar. Referenciar un `.ico` suelto además sería tener el mismo icono
+; en dos sitios y un día uno de los dos se quedaría viejo.
 Name: "{group}\{#Nombre}"; Filename: "{app}\{#Ejecutable}"; \
     Parameters: "{#Argumentos}"; WorkingDir: "{app}"
 Name: "{group}\Cómo actualizar"; Filename: "{app}\como_actualizar.md"
@@ -225,7 +242,7 @@ end;
 
 function QuitarAnterior(): Boolean;
 var
-  desinstalador, previa, mensaje, carpeta: String;
+  desinstalador, previa, mensaje, carpeta, modo: String;
   respuesta, codigo, espera: Integer;
 begin
   Result := True;
@@ -296,7 +313,20 @@ begin
     Exit;
   end;
 
-  if not Exec(desinstalador, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART',
+  // `/SILENT` y no `/VERYSILENT`: la diferencia es que `/SILENT` **sí enseña
+  // la ventana de progreso** de la desinstalación. Con `/VERYSILENT` no se ve
+  // nada: el instalador se quedaba congelado unos segundos sin explicar por
+  // qué, que desde fuera es un programa colgado. Las preguntas las quita
+  // `/SUPPRESSMSGBOXES`, no `/VERYSILENT`.
+  //
+  // Si la instalación sí es silenciosa de verdad, se respeta y no se enseña
+  // ninguna ventana.
+  if WizardSilent then
+    modo := '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART'
+  else
+    modo := '/SILENT /SUPPRESSMSGBOXES /NORESTART';
+
+  if not Exec(desinstalador, modo,
               '', SW_SHOW, ewWaitUntilTerminated, codigo) then
   begin
     MsgBox('No se pudo ejecutar el desinstalador anterior. Se continuará ' +
@@ -325,26 +355,168 @@ begin
            'a instalar.', mbInformation, MB_OK);
 end;
 
+// --- BIMNEMO abierto -------------------------------------------------------
+//
 // Si hay una instalación previa corriendo, sus ficheros están en uso y la
 // copia falla a medias. Se avisa antes en vez de dejar la instalación rota.
-function InitializeSetup(): Boolean;
+//
+// Pero decir «ciérralo» no siempre basta: **BIMNEMO puede estar en marcha sin
+// ninguna ventana**. El motor y la ventana son dos procesos, y si la ventana
+// se cierra mal el motor se queda vivo por detrás. Entonces el usuario lee
+// «ciérralo» mirando un escritorio vacío y se queda atascado sin salida. Así
+// que se ofrece cerrarlo desde aquí.
+
+function CarpetaDeLaInstalacion(): String;
+begin
+  Result := LeerPrevio('Inno Setup: App Path');
+  if (Result = '') and HayInstalacionEn(CarpetaPorDefecto()) then
+    Result := CarpetaPorDefecto();
+end;
+
+// En WQL la barra invertida es el carácter de escape, así que hay que
+// doblarla o ninguna ruta casa con nada.
+function ParaWQL(ruta: String): String;
+begin
+  Result := ruta;
+  StringChangeEx(Result, '\', '\\', True);
+end;
+
+// Mata lo que devuelva la consulta. Devuelve cuántos, o -1 si ni se pudo
+// preguntar (sin WMI no hay nada que hacer, pero tampoco se rompe nada).
+function TerminarPorConsulta(consulta: String): Integer;
 var
-  Resultado: Integer;
+  localizador, servicios, conjunto, proceso: Variant;
+  i: Integer;
+begin
+  Result := 0;
+  try
+    localizador := CreateOleObject('WbemScripting.SWbemLocator');
+    servicios := localizador.ConnectServer('', 'root\CIMV2');
+    conjunto := servicios.ExecQuery(consulta);
+    for i := 0 to conjunto.Count - 1 do
+    begin
+      proceso := conjunto.ItemIndex(i);
+      proceso.Terminate();
+      Result := Result + 1;
+    end;
+  except
+    Result := -1;
+  end;
+end;
+
+// Cierra BIMNEMO entero. **Solo BIMNEMO.**
+//
+// La tentación es un `taskkill /IM pythonw.exe`, y sería un desastre: se
+// llevaría por delante cualquier otro Python del usuario —un script suyo a
+// medias, otra aplicación— sin que él lo sepa.
+//
+// Son DOS cosas distintas, y esto costó una prueba fallida entenderlo:
+//
+//  1. **La ventana** es un Chromium *del sistema*. Su ejecutable está en
+//     `Program Files`, no en la carpeta de BIMNEMO, así que filtrar por la
+//     ruta del ejecutable no la tocaba: el motor moría y la ventana se
+//     quedaba en pantalla, enseñando la página que ya tenía cargada. Desde
+//     fuera parecía que el botón de cerrar no hacía nada y que BIMNEMO
+//     seguía vivo mientras se desinstalaba.
+//
+//     Se reconoce por el perfil propio que se le pasa en la línea de
+//     órdenes, que no comparte con ningún otro navegador del usuario.
+//
+//  2. **El motor y el lanzador** sí viven en la carpeta de la instalación.
+//
+// Se repite hasta que no queda ninguno porque el lanzador vigila al motor y
+// lo vuelve a levantar si se muere: matarlos en el orden equivocado dejaría
+// un motor recién nacido con los ficheros abiertos.
+function CerrarBimnemo(carpeta: String): Integer;
+var
+  vuelta, cerrados, n: Integer;
+  perfil: String;
+begin
+  Result := 0;
+  perfil := ExpandConstant('{localappdata}\BIMNEMO\chromium-profile');
+
+  for vuelta := 1 to 5 do
+  begin
+    cerrados := 0;
+
+    n := TerminarPorConsulta(
+      'SELECT ProcessId FROM Win32_Process WHERE CommandLine LIKE "%' +
+      ParaWQL(perfil) + '%"');
+    if n > 0 then
+      cerrados := cerrados + n;
+
+    if carpeta <> '' then
+    begin
+      n := TerminarPorConsulta(
+        'SELECT ProcessId FROM Win32_Process WHERE ExecutablePath LIKE "' +
+        ParaWQL(AddBackslash(carpeta)) + '%"');
+      if n > 0 then
+        cerrados := cerrados + n;
+    end;
+
+    Result := Result + cerrados;
+    if cerrados = 0 then
+      Break;
+    Sleep(700);
+  end;
+end;
+
+function AsegurarCerrado(): Boolean;
+var
+  respuesta: Integer;
 begin
   Result := True;
-  if CheckForMutexes('BIMNEMO_EN_MARCHA') then
+  while CheckForMutexes('BIMNEMO_EN_MARCHA') do
   begin
-    // En silencio se cancela (IDCANCEL): mejor que la instalación falle con
-    // un código de error a que machaque ficheros en uso y deje la aplicación
-    // rota sin que nadie se entere.
-    Resultado := SuppressibleMsgBox(
-      'BIMNEMO parece estar abierto.' + #13#10#13#10 +
-      'Ciérralo antes de continuar; si no, la instalación puede quedar a medias.',
-      mbError, MB_RETRYCANCEL, IDCANCEL);
-    Result := (Resultado = IDRETRY);
-    if not Result then
+    // En silencio se contesta que sí (IDYES): cerrarlo es lo que permite
+    // seguir. Si aun así no se puede, se cancela unas líneas más abajo.
+    respuesta := SuppressibleMsgBox(
+      'BIMNEMO está abierto, y hay que cerrarlo antes de continuar: si no, ' +
+      'la instalación puede quedar a medias.' + #13#10 +
+      '' + #13#10 +
+      'Si no ves ninguna ventana de BIMNEMO, es que el motor se quedó en ' +
+      'marcha por detrás. Puedo cerrarlo yo; no afecta a nada más de tu ' +
+      'ordenador, ni a tus documentos.' + #13#10 +
+      '' + #13#10 +
+      '¿Lo cierro ahora?',
+      mbConfirmation, MB_YESNOCANCEL, IDYES);
+
+    if respuesta = IDCANCEL then
+    begin
+      Result := False;
       Exit;
+    end;
+
+    if respuesta = IDYES then
+    begin
+      if CerrarBimnemo(CarpetaDeLaInstalacion()) <> 0 then
+        // Al proceso le lleva un instante morirse y soltar el mutex.
+        Sleep(2000);
+
+      if CheckForMutexes('BIMNEMO_EN_MARCHA') then
+      begin
+        if SuppressibleMsgBox(
+             'No he conseguido cerrar BIMNEMO.' + #13#10 +
+             '' + #13#10 +
+             'Ciérralo a mano y reintenta. Si no encuentras su ventana, ' +
+             'búscalo en el Administrador de tareas como «pythonw.exe» o ' +
+             '«python.exe».',
+             mbError, MB_RETRYCANCEL, IDCANCEL) = IDCANCEL then
+        begin
+          Result := False;
+          Exit;
+        end;
+      end;
+    end;
+    // Con IDNO se vuelve a comprobar: el usuario lo está cerrando él mismo.
   end;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := AsegurarCerrado();
+  if not Result then
+    Exit;
 
   Result := QuitarAnterior();
 end;

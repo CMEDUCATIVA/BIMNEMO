@@ -327,6 +327,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="No abre ventana propia: solo arranca el servidor.",
     )
+    parser.add_argument(
+        "--nativo",
+        action="store_true",
+        help="Abre la ventana nativa (en construcción) en vez de la de "
+        "navegador.",
+    )
     return parser.parse_args(argv)
 
 
@@ -476,6 +482,25 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             _shutdown(server)
         return 0
+
+    if args.nativo:
+        # La ventana nativa está en construcción (ver
+        # `docs/BIMNEMO_INTERFAZ_NATIVA.md`). Mientras no esté terminada hay
+        # que pedirla a mano: así nunca hay una versión publicada en la que
+        # el usuario se quede sin pantallas.
+        from lightrag.api.bimnemo import BIMNEMO_VERSION, nativo
+
+        if not nativo.disponible():
+            print(
+                "La ventana nativa necesita Qt (PySide6), que no está en "
+                "este paquete.\nSe abre la de navegador.",
+                file=sys.stderr,
+            )
+        else:
+            try:
+                return nativo.abrir(base_url, BIMNEMO_VERSION)
+            finally:
+                _shutdown(server)
 
     chromium = find_chromium(args.chromium)
     if chromium is None:

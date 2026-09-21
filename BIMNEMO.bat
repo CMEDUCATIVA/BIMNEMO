@@ -21,10 +21,13 @@ REM muere con UnicodeEncodeError antes de escuchar.
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
-REM Dos formas de estar instalado, y hay que soportar las dos:
-REM   * con el instalador  -> Python portable en python\
+REM Tres formas de estar instalado, y hay que soportar las tres:
+REM   * con el instalador        -> bimnemo-consola.exe, que es el interprete
+REM                                 del paquete con la cara de BIMNEMO
+REM   * paquetes anteriores      -> python.exe a secas
 REM   * clonado para desarrollar -> entorno virtual en .venv\
-set "PY=%RAIZ%python\python.exe"
+set "PY=%RAIZ%python\bimnemo-consola.exe"
+if not exist "%PY%" set "PY=%RAIZ%python\python.exe"
 if not exist "%PY%" set "PY=%RAIZ%.venv\Scripts\python.exe"
 
 if not exist "%PY%" (
