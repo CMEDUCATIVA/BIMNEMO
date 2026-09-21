@@ -335,6 +335,18 @@ def hoja(p: Paleta) -> str:
         border-radius: {RADIO}px;
         padding: 0;
     }}
+    /* El «+» de crear memoria: mismo tamaño que sus vecinos, pero azul.
+       Es la acción que añade, y la única de la barra que crea algo. */
+    QPushButton#principal-icono {{
+        background: {p.azul};
+        border: 1px solid {p.azul};
+        border-radius: {RADIO}px;
+        padding: 0;
+    }}
+    QPushButton#principal-icono:hover {{ background: {p.azul_hover}; }}
+    QPushButton#icono:disabled {{
+        border-color: {p.borde};
+    }}
     QPushButton#icono:hover {{
         background: {p.secundaria};
         border-color: {p.azul};
@@ -378,8 +390,11 @@ def hoja(p: Paleta) -> str:
 
     /* El pie del grafo: leyenda y ayuda. Con fondo y un borde arriba para
        que se lea como pie y no como algo flotando sobre el lienzo. */
+    /* La caja lleva el color de la tarjeta, NO el del lienzo. Con los dos
+       del mismo color no se veía dónde acababa el dibujo, y la leyenda de
+       abajo parecía flotar sobre él en vez de estar en el hueco de la caja. */
     #caja-grafo {{
-        background: {p.fondo};
+        background: {p.elevada};
         border: 1px solid {p.borde};
         border-radius: 8px;
     }}
@@ -568,6 +583,29 @@ def hoja(p: Paleta) -> str:
         padding: 6px;
         text-align: left;
     }}
+
+    /* --- Diálogos ------------------------------------------------------- */
+    QDialog {{ background: {p.elevada}; }}
+    /* El rótulo de un campo, encima de su caja. */
+    #rotulo-campo {{
+        color: {p.texto_2};
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    #error {{ color: #f87171; font-size: 12px; }}
+    QCheckBox {{ color: {p.texto_2}; spacing: 8px; }}
+    QCheckBox::indicator {{
+        background: {p.fondo};
+        border: 1px solid {p.borde_medio};
+        border-radius: 4px;
+        height: 15px;
+        width: 15px;
+    }}
+    QCheckBox::indicator:checked {{
+        background: {p.azul};
+        border-color: {p.azul};
+    }}
+    QCheckBox:disabled {{ color: {p.texto_3}; }}
 
     QScrollBar:vertical {{
         background: transparent; width: 10px; margin: 0;

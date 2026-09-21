@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 
 from lightrag.api.bimnemo.nativo import iconos
 from lightrag.api.bimnemo.nativo.disposicion import DISPOSICIONES
-from lightrag.api.bimnemo.nativo import formato
+from lightrag.api.bimnemo.nativo import formato, tema
 from lightrag.api.bimnemo.nativo.grafo import Grafo
 from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo.piezas import Aviso, Fluida, Tarjeta
@@ -230,7 +230,7 @@ class Cifra(QFrame):
         fila.setSpacing(7)
 
         marca = QLabel()
-        marca.setPixmap(iconos.pixmap(icono_nombre, 14, "#3b82f6"))
+        marca.setPixmap(iconos.pixmap(icono_nombre, 14, tema.ACTUAL.azul))
         fila.addWidget(marca)
 
         etiqueta = QLabel(rotulo.upper())
@@ -256,7 +256,7 @@ class Cifra(QFrame):
 def _boton_icono(nombre: str, pista: str) -> QPushButton:
     boton = QPushButton()
     boton.setObjectName("icono")
-    boton.setIcon(iconos.icono(nombre, 15, "#cbd5e1"))
+    boton.setIcon(iconos.icono(nombre, 15, tema.ACTUAL.texto_2))
     boton.setToolTip(pista)
     boton.setCursor(Qt.PointingHandCursor)
     boton.setFixedSize(32, 30)
@@ -369,7 +369,7 @@ class PantallaPanel(QWidget):
         fila.setSpacing(8)
 
         marca = QLabel()
-        marca.setPixmap(iconos.pixmap("entidades", 15, "#3b82f6"))
+        marca.setPixmap(iconos.pixmap("entidades", 15, tema.ACTUAL.azul))
         fila.addWidget(marca)
 
         titulo = QLabel("Grafo de conocimiento")
@@ -391,8 +391,10 @@ class PantallaPanel(QWidget):
         self.caja_lienzo = QFrame()
         self.caja_lienzo.setObjectName("caja-grafo")
         caja = QVBoxLayout(self.caja_lienzo)
-        caja.setContentsMargins(1, 1, 1, 1)
-        caja.setSpacing(0)
+        # El lienzo va embutido con aire alrededor, y debajo queda el hueco
+        # para la leyenda: dentro de la caja, no encima del dibujo.
+        caja.setContentsMargins(8, 8, 8, 4)
+        caja.setSpacing(8)
 
         self.grafo = Grafo()
         self.grafo.elegido.connect(self._pintar_detalle)

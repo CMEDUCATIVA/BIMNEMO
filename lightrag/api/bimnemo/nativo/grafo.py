@@ -38,7 +38,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
-from lightrag.api.bimnemo.nativo import disposicion
+from lightrag.api.bimnemo.nativo import disposicion, tema
 
 # --- Constantes de la simulación, copiadas de `grafo-lienzo.js` -------------
 
@@ -399,25 +399,18 @@ class Grafo(QWidget):
     def paintEvent(self, _evento) -> None:  # noqa: N802 (nombre de Qt)
         pintor = QPainter(self)
         pintor.setRenderHint(QPainter.Antialiasing)
-        # Redondeado arriba y recto abajo: abajo va pegado al pie, dentro del
-        # mismo marco. Pintando un rectángulo a sangre, el lienzo se comía
-        # las esquinas de la caja y parecía salirse de ella.
+        # Redondeado por los cuatro lados: el lienzo es un rectángulo
+        # **dentro** de la caja, con el hueco de la leyenda debajo. Recto por
+        # abajo se confundía con el fondo de la caja y no se veía dónde
+        # terminaba el dibujo.
         fondo = QPainterPath()
-        radio = 7.0
-        caja = QRectF(self.rect())
-        fondo.moveTo(caja.left(), caja.bottom())
-        fondo.lineTo(caja.left(), caja.top() + radio)
-        fondo.quadTo(caja.left(), caja.top(), caja.left() + radio, caja.top())
-        fondo.lineTo(caja.right() - radio, caja.top())
-        fondo.quadTo(caja.right(), caja.top(), caja.right(), caja.top() + radio)
-        fondo.lineTo(caja.right(), caja.bottom())
-        fondo.closeSubpath()
+        fondo.addRoundedRect(QRectF(self.rect()), 7.0, 7.0)
         pintor.fillPath(fondo, QColor("#020617"))
         # Todo lo demás se recorta a ese fondo: ni un nodo fuera de la caja.
         pintor.setClipPath(fondo)
 
         if not self._nodos:
-            pintor.setPen(QColor("#94a3b8"))
+            pintor.setPen(QColor(tema.ACTUAL.texto_3))
             pintor.drawText(
                 self.rect(),
                 Qt.AlignCenter,
@@ -465,17 +458,17 @@ class Grafo(QWidget):
 
             if casa:
                 # Halo claro alrededor del acierto, y el nodo más grande.
-                halo = QColor("#f8fafc")
+                halo = QColor(tema.ACTUAL.texto)
                 halo.setAlpha(70)
                 pintor.setPen(Qt.NoPen)
                 pintor.setBrush(halo)
                 pintor.drawEllipse(centro, radio + 7, radio + 7)
                 pintor.setBrush(color)
-                pintor.setPen(QPen(QColor("#f8fafc"), 2.0))
+                pintor.setPen(QPen(QColor(tema.ACTUAL.texto), 2.0))
             elif i == self._elegido:
-                pintor.setPen(QPen(QColor("#f1f5f9"), 2.0))
+                pintor.setPen(QPen(QColor(tema.ACTUAL.texto), 2.0))
             elif i == self._encima:
-                pintor.setPen(QPen(QColor("#cbd5e1"), 1.5))
+                pintor.setPen(QPen(QColor(tema.ACTUAL.texto_2), 1.5))
             else:
                 pintor.setPen(Qt.NoPen)
             pintor.drawEllipse(centro, radio, radio)
@@ -510,11 +503,13 @@ class Grafo(QWidget):
                     centro.x() - ancho / 2, caja.top() - 1, ancho, 15
                 )
                 pintor.setPen(Qt.NoPen)
-                pintor.setBrush(QColor(2, 6, 23, 210))
+                telon = QColor(tema.ACTUAL.fondo)
+                telon.setAlpha(210)
+                pintor.setBrush(telon)
                 pintor.drawRoundedRect(fondo, 3, 3)
-                pintor.setPen(QColor("#bfdbfe"))
+                pintor.setPen(QColor(tema.ACTUAL.azul))
             else:
-                pintor.setPen(QColor("#cbd5e1"))
+                pintor.setPen(QColor(tema.ACTUAL.texto_2))
 
             pintor.setBrush(Qt.NoBrush)
             pintor.drawText(
