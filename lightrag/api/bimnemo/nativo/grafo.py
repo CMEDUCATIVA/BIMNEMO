@@ -122,6 +122,15 @@ class Grafo(QWidget):
         self._resaltados: set[int] = set()
         self._vecinos: set[int] = set()
         self._encuadre_pendiente = False
+        #: ¿Ha movido el usuario la vista a mano?
+        #:
+        #: Mientras no la toque, el grafo se reencuadra solo cada vez que su
+        #: caja cambia de tamaño —al pasar a apilado, al maximizar—. En
+        #: cuanto arrastra o hace zoom, deja de hacerlo: reencuadrar encima
+        #: de alguien que acaba de colocarse donde quería es lo más molesto
+        #: que puede hacer una interfaz. Vuelve a seguirle el tamaño con el
+        #: botón de encajar o al cargar otro grafo.
+        self._vista_tocada = False
 
         self._alpha = 0.0
         self._vista = [0.0, 0.0, 1.0]  # desplazamiento x, y, y escala
@@ -173,6 +182,7 @@ class Grafo(QWidget):
         self._resaltados = set()
         self._vecinos = set()
         self._encuadre_pendiente = True
+        self._vista_tocada = False
         self._colocar()
         self.update()
 
@@ -230,7 +240,7 @@ class Grafo(QWidget):
             # nadie lo recolocaba.
             if self._encuadre_pendiente:
                 self._encuadre_pendiente = False
-                self.encuadrar()
+                self.encuadrar(por_el_usuario=False)
             return
 
         pos = self._pos
@@ -255,10 +265,10 @@ class Grafo(QWidget):
         if atlas:
             # La repulsión crece con las relaciones de cada extremo: los
             # concentradores se apartan y arrastran a sus vecinos.
-            peso = (self._grados + 1.0)
-            escala = (
-                ATLAS_REPULSION * peso[:, None] * peso[None, :]
-            ) / (dist2 * np.sqrt(dist2))
+            peso = self._grados + 1.0
+            escala = (ATLAS_REPULSION * peso[:, None] * peso[None, :]) / (
+                dist2 * np.sqrt(dist2)
+            )
         else:
             escala = REPULSION / (dist2 * np.sqrt(dist2))
         np.fill_diagonal(escala, 0.0)
@@ -270,9 +280,7 @@ class Grafo(QWidget):
             largo = float(np.hypot(d[0], d[1])) or 0.01
             # En Atlas la atracción es lineal con la distancia y sin longitud
             # en reposo: por eso hace cúmulos en vez de repartir parejo.
-            tiron = (
-                ATLAS_ATTRACTION if atlas else SPRING * (largo - SPRING_LEN) / largo
-            )
+            tiron = ATLAS_ATTRACTION if atlas else SPRING * (largo - SPRING_LEN) / largo
             fuerza[a] += d * tiron
             fuerza[b] -= d * tiron
 
@@ -295,8 +303,13 @@ class Grafo(QWidget):
 
     # -- vista --------------------------------------------------------------
 
-    def encuadrar(self) -> None:
+    def encuadrar(self, por_el_usuario: bool = True) -> None:
         """Centra y ajusta el zoom para que quepa todo."""
+        if por_el_usuario:
+            # Pulsar «encajar» vuelve a poner el grafo a seguir el tamaño de
+            # su caja. Es la forma de deshacer un zoom del que uno se
+            # arrepiente sin tener que recargar.
+            self._vista_tocada = False
         if not len(self._pos):
             return
         minimos = self._pos.min(axis=0)
@@ -363,8 +376,7 @@ class Grafo(QWidget):
             self._resaltados = {
                 i
                 for i, n in enumerate(self._nodos)
-                if aguja
-                in self._sin_tildes(str(n.get("label") or n.get("id") or ""))
+                if aguja in self._sin_tildes(str(n.get("label") or n.get("id") or ""))
             }
         self.update()
         return len(self._resaltados)
@@ -375,9 +387,7 @@ class Grafo(QWidget):
             self._vecinos = set()
             return
         self._vecinos = {indice} | {
-            b if a == indice else a
-            for a, b in self._aristas
-            if indice in (a, b)
+            b if a == indice else a for a, b in self._aristas if indice in (a, b)
         }
 
     def _a_pantalla(self, punto: np.ndarray) -> QPointF:
@@ -398,6 +408,17 @@ class Grafo(QWidget):
         cerca = d - self._radio / max(self._vista[2], 0.05)
         i = int(np.argmin(cerca))
         return i if cerca[i] <= 0 else None
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre de Qt)
+        """Sigue el tamaño de su caja.
+
+        Al pasar de dos columnas a apiladas, o al maximizar la ventana, la
+        caja cambia de tamaño pero la vista se quedaba como estaba: el grafo
+        salía descentrado, o diminuto en una caja grande.
+        """
+        super().resizeEvent(evento)
+        if self._nodos and not self._vista_tocada:
+            self.encuadrar(por_el_usuario=False)
 
     # -- dibujo -------------------------------------------------------------
 
@@ -444,7 +465,9 @@ class Grafo(QWidget):
                 pluma.setColor(QColor(148, 163, 184, 25))
             pluma.setWidthF(max(0.6, 1.0 * k))
             pintor.setPen(pluma)
-            pintor.drawLine(self._a_pantalla(self._pos[a]), self._a_pantalla(self._pos[b]))
+            pintor.drawLine(
+                self._a_pantalla(self._pos[a]), self._a_pantalla(self._pos[b])
+            )
 
         fuente = QFont(self.font())
         fuente.setPointSizeF(max(6.0, 8.0 * min(k, 1.6)))
@@ -511,9 +534,7 @@ class Grafo(QWidget):
                 # Fondo detrás del nombre del acierto: sobre una maraña de
                 # aristas, el texto claro solo no se lee.
                 ancho = pintor.fontMetrics().horizontalAdvance(texto) + 8
-                fondo = QRectF(
-                    centro.x() - ancho / 2, caja.top() - 1, ancho, 15
-                )
+                fondo = QRectF(centro.x() - ancho / 2, caja.top() - 1, ancho, 15)
                 pintor.setPen(Qt.NoPen)
                 telon = QColor(tema.ACTUAL.fondo)
                 telon.setAlpha(210)
@@ -533,6 +554,7 @@ class Grafo(QWidget):
     # -- gestos -------------------------------------------------------------
 
     def wheelEvent(self, evento: QWheelEvent) -> None:  # noqa: N802
+        self._vista_tocada = True
         factor = 1.0 + evento.angleDelta().y() / 1200.0
         antes = self._a_mundo(evento.position())
         self._vista[2] = max(0.05, min(6.0, self._vista[2] * factor))
@@ -571,6 +593,7 @@ class Grafo(QWidget):
             self.update()
             return
         if self._paneando is not None:
+            self._vista_tocada = True
             delta = evento.position() - self._paneando
             self._vista[0] += delta.x()
             self._vista[1] += delta.y()
