@@ -8,17 +8,19 @@ modelo de lenguaje y los embeddings.
 
 ## Cuándo sale
 
-Cuando la única memoria es la de fábrica —la «General»— y no tiene ningún
-archivo. Es decir, cuando no hay nada que perder. En cuanto hay documentos, o
-la memoria tiene otro nombre, no vuelve a salir: preguntar «¿cómo se llama tu
+Cuando no hay ninguna memoria: una instalación nueva, o después de borrar la
+última. También con la «General» de fábrica vacía, que es como quedaban las
+instalaciones de antes de que la base pudiera ocultarse. En cuanto hay
+documentos, o una memoria con nombre, no sale: preguntar «¿cómo se llama tu
 primera memoria?» a quien ya lleva meses usándolo sería absurdo.
 
-## La primera memoria es la de fábrica, con el nombre que se elija
+## La primera memoria es la base, con el nombre que se elija
 
-No se crea una memoria al lado de «General»: se le pone el nombre a ésa. Así
-no queda una «General» vacía para siempre en el selector, que es justo lo que
-no se quiere ver. El identificador no cambia —renombrar solo toca el rótulo—,
-así que no se mueve ningún fichero.
+El motor necesita un espacio de trabajo por defecto, así que la memoria base
+existe siempre, aunque oculta. Ponerle nombre es lo que la hace aparecer: no
+se crea otra al lado, y no queda ninguna «General» colgando en el selector.
+El identificador no cambia —renombrar solo toca el rótulo—, así que no se
+mueve ningún fichero.
 
 ## «Ahora no» y no «Salir»
 
@@ -73,8 +75,11 @@ PEDIDAS = ("llm", "embedding")
 def es_nueva(nemos: list[dict[str, Any]], archivos: int) -> bool:
     """¿Es una instalación sin estrenar?
 
-    Una sola memoria, la de fábrica, con su nombre de fábrica y sin archivos.
+    Sin ninguna memoria a la vista, o con la de fábrica, con su nombre de
+    fábrica y sin archivos.
     """
+    if not nemos:
+        return True
     if len(nemos) != 1:
         return False
     unica = nemos[0]
@@ -131,6 +136,15 @@ class Bienvenida(QWidget):
         self._fondo: Optional[QPixmap] = None
         self._trabajo: Optional[Reinicio] = None
         self.secciones: dict[str, Seccion] = {}
+        #: Si en la última lista había alguna memoria. Sirve para volver a
+        #: salir al borrar la última, pero no cada vez que la ventana relee
+        #: una lista que ya estaba vacía: quien dijo «Ahora no» lo dijo.
+        self._habia: Optional[bool] = None
+        # La lista puede haber llegado ya: con un motor que contesta
+        # enseguida, antes de que este cuadro exista.
+        if memorias.nemos:
+            self._habia = True
+        memorias.listado.connect(self._lista_nueva)
 
         fuera = QVBoxLayout(self)
         fuera.setContentsMargins(24, 24, 24, 24)
@@ -255,6 +269,9 @@ class Bienvenida(QWidget):
             if not isinstance(datos, dict):
                 return
             nemos = list(datos.get("nemos") or [])
+            if not nemos:
+                self.mostrar()
+                return
             if len(nemos) != 1:
                 return
             self.motor.get(
@@ -270,7 +287,19 @@ class Bienvenida(QWidget):
 
         self.motor.get("/bimnemo/nemos", memorias, None)
 
+    def _lista_nueva(self) -> None:
+        """Al borrar la última memoria, el cuadro vuelve."""
+        hay = bool(self.memorias.nemos)
+        if self._habia and not hay and self.isHidden():
+            self.mostrar()
+        self._habia = hay
+
     def mostrar(self) -> None:
+        # Limpio cada vez: al volver tras borrar la última memoria traía el
+        # nombre de la anterior y el último mensaje del reinicio.
+        self.nombre.clear()
+        self.aviso.callar()
+        self.barra.hide()
         self._fotografiar()
         # Lo de detrás no se puede tocar mientras el cuadro esté: se pintaría
         # encima de una pantalla que sigue viva por debajo.
@@ -372,8 +401,8 @@ class Bienvenida(QWidget):
 
         self._ocupado(True)
         self.aviso.informar("Creando la memoria…")
-        # La de fábrica tiene el identificador vacío: se indica por
-        # parámetro, porque una cadena vacía no cabe en una ruta.
+        # Es la base la que se nombra. Tiene el identificador vacío: se indica
+        # por parámetro, porque una cadena vacía no cabe en una ruta.
         self.motor.parchear(
             "/bimnemo/nemos?nemo=",
             {"name": self.nombre.text().strip()},

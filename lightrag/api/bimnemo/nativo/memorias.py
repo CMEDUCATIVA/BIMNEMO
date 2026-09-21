@@ -392,35 +392,23 @@ class DialogoRenombrar(_Dialogo):
 
 
 class DialogoBorrar(_Dialogo):
-    """Borrar una memoria. Exige escribir el nombre exacto."""
+    """Borrar una memoria. Exige escribir el nombre exacto.
+
+    La memoria base también se borra, aunque por dentro sea distinto: se
+    vacía y se oculta, porque es el espacio de trabajo por defecto del motor
+    y no puede desaparecer. Para quien la borra es lo mismo que cualquier
+    otra: deja de estar, y si era la última, vuelve el cuadro de la primera
+    memoria.
+    """
 
     def __init__(
         self, motor: Motor, ficha: dict[str, Any], padre: Optional[QWidget] = None
     ) -> None:
-        self.protegida = bool(ficha.get("protected"))
         nombre = str(ficha.get("name") or "")
-        super().__init__(
-            "Esta memoria no se puede borrar"
-            if self.protegida
-            else f"Borrar «{nombre}»",
-            "borrar",
-            padre,
-        )
+        super().__init__(f"Borrar «{nombre}»", "borrar", padre)
         self.motor = motor
         self.ficha = ficha
         self.borrada = False
-
-        if self.protegida:
-            # Se dice en el mismo sitio donde se iba a borrar: mandarlo a otra
-            # ventana obligaría a cerrar dos cosas para enterarse de una.
-            self.parrafo(
-                f"«{nombre}» es la memoria base: es donde vive todo lo que se "
-                "indexó antes de que existieran las demás. Puedes vaciarla, "
-                "pero no quitarla."
-            )
-            boton = self.botonera("Entendido", "")
-            boton.hide()
-            return
 
         aviso = self.parrafo(
             "Se borrarán sus archivos, su índice y su grafo. No se puede "
@@ -471,10 +459,36 @@ class DialogoBorrar(_Dialogo):
             self.aceptar.setText("Borrar definitivamente")
             self.fallar(f"No se pudo borrar: {motivo}")
 
+        if nemo:
+            self.motor.borrar(
+                f"/bimnemo/nemos/{nemo}",
+                {"confirm_name": nombre, "purge_files": True},
+                hecho,
+                no_pudo,
+            )
+            return
+
+        # La base: primero se vacía y después se quita del índice. En ese
+        # orden y no en otro: el motor se niega a quitarla con documentos
+        # dentro, porque quedarían escondidos y reaparecerían al nombrar la
+        # primera memoria. El vaciado es el de siempre del motor, que borra
+        # solo lo suyo y respeta las carpetas de las demás memorias.
+        def quitar(respuesta: Any) -> None:
+            estado = str((respuesta or {}).get("status") or "")
+            if estado != "success":
+                no_pudo(
+                    str((respuesta or {}).get("message") or "")
+                    or "el motor no pudo vaciarla"
+                )
+                return
+            self.motor.borrar(
+                "/bimnemo/nemos?nemo=", {"confirm_name": nombre}, hecho, no_pudo
+            )
+
         self.motor.borrar(
-            f"/bimnemo/nemos/{nemo}",
-            {"confirm_name": nombre, "purge_files": True},
-            hecho,
+            "/documents?delete_parsed_files=true&clear_llm_cache=true",
+            {},
+            quitar,
             no_pudo,
         )
 

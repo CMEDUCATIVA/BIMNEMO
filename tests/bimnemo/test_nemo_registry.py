@@ -81,13 +81,88 @@ def test_un_nombre_sin_caracteres_utilizables_se_rechaza(registry):
 # --- Creación ---------------------------------------------------------------
 
 
-def test_al_arrancar_existe_la_nemo_heredada(registry):
-    nemos = registry.list()
-    assert len(nemos) == 1
-    assert nemos[0].id == LEGACY_ID
-    assert nemos[0].name == LEGACY_NAME
-    assert nemos[0].protected is True
+def test_una_instalacion_nueva_no_enseña_ninguna_memoria(registry):
+    """El usuario la encuentra limpia: la primera memoria la nombra él.
+
+    La base existe por dentro —el motor necesita un espacio por defecto— pero
+    oculta, así que no sale en la lista.
+    """
+    assert registry.list() == []
+    base = registry.get(LEGACY_ID)
+    assert base is not None and base.hidden and base.protected
     assert registry.default_id == LEGACY_ID
+
+
+def test_con_datos_en_la_base_se_enseña_aunque_falte_el_indice(tmp_path):
+    """Un índice perdido no puede esconder los documentos de nadie."""
+    (tmp_path / "kv_store_doc_status.json").write_text(
+        json.dumps({"doc-1": {"status": "processed"}}), encoding="utf-8"
+    )
+    registro = NemoRegistry(working_dir=tmp_path)
+    registro.load()
+
+    assert [n.id for n in registro.list()] == [LEGACY_ID]
+    assert registro.list()[0].name == LEGACY_NAME
+
+
+def test_un_indice_viejo_con_la_general_la_sigue_enseñando(tmp_path):
+    """Quien actualiza no pierde de vista su «General»."""
+    (tmp_path / "bimnemo_nemos.json").write_text(
+        json.dumps(
+            {"version": 1, "default": "",
+             "nemos": [{"id": "", "name": "General", "protected": True}]}
+        ),
+        encoding="utf-8",
+    )
+    registro = NemoRegistry(working_dir=tmp_path)
+    registro.load()
+
+    assert [n.name for n in registro.list()] == ["General"]
+
+
+def test_nombrar_la_base_oculta_crea_la_primera_memoria(registry, tmp_path):
+    registry.rename(LEGACY_ID, "Obra Norte")
+
+    assert [(n.id, n.name) for n in registry.list()] == [(LEGACY_ID, "Obra Norte")]
+    # Y se queda así al recargar.
+    otro = NemoRegistry(working_dir=tmp_path)
+    otro.load()
+    assert [n.name for n in otro.list()] == ["Obra Norte"]
+
+
+def test_borrar_la_base_la_oculta_y_vuelve_a_su_nombre(registry, tmp_path):
+    registry.rename(LEGACY_ID, "Obra Norte")
+    registry.delete(LEGACY_ID)
+
+    assert registry.list() == []
+    assert registry.get(LEGACY_ID).name == LEGACY_NAME
+    otro = NemoRegistry(working_dir=tmp_path)
+    otro.load()
+    assert otro.list() == [], "tras recargar volvía a aparecer"
+
+
+def test_borrar_la_base_con_otras_pasa_el_defecto_a_una_visible(registry):
+    registry.rename(LEGACY_ID, "Primera")
+    registry.create("Segunda")
+    registry.set_default(LEGACY_ID)
+
+    registry.delete(LEGACY_ID)
+
+    assert [n.id for n in registry.list()] == ["Segunda"]
+    assert registry.default_id == "Segunda"
+
+
+def test_crear_con_la_base_oculta_la_nueva_pasa_a_ser_la_de_defecto(registry):
+    """Si no, las peticiones sin memoria irían a una base vacía e invisible."""
+    registry.create("Obra")
+
+    assert registry.default_id == "Obra"
+
+
+def test_la_base_oculta_no_bloquea_el_nombre_general(registry):
+    registry.create("General")
+
+    assert [n.name for n in registry.list()] == ["General"]
 
 
 def test_crear_devuelve_la_nemo_y_la_persiste(registry, tmp_path):
@@ -141,7 +216,7 @@ def test_no_se_admite_la_misma_nemo_cambiando_mayusculas(registry):
     registry.create("Obra")
     with pytest.raises(NemoError):
         registry.create("OBRA")
-    assert len(registry.list()) == 2  # la base y «Obra»
+    assert [n.name for n in registry.list()] == ["Obra"]
 
 
 def test_nombres_distintos_que_sanean_a_la_misma_carpeta_chocan(registry):
@@ -218,8 +293,9 @@ def test_borrar_quita_del_indice_pero_no_de_disco(registry, tmp_path):
     assert (carpeta / "dato.json").is_file()
 
 
-def test_la_nemo_base_no_se_puede_borrar(registry):
-    with pytest.raises(NemoError, match="memoria base"):
+def test_no_se_borra_dos_veces_la_base(registry):
+    """Oculta ya está «borrada»: volver a borrarla es un error, no un nada."""
+    with pytest.raises(NemoError, match="No existe"):
         registry.delete(LEGACY_ID)
 
 
@@ -245,7 +321,7 @@ def test_lo_guardado_se_recupera_al_recargar(tmp_path):
     segundo = NemoRegistry(working_dir=tmp_path)
     segundo.load()
 
-    assert [n.id for n in segundo.list()] == [LEGACY_ID, "Obra_Sur", "Proyecto_Norte"]
+    assert [n.id for n in segundo.list()] == ["Obra_Sur", "Proyecto_Norte"]
     assert segundo.default_id == "Obra_Sur"
 
 
@@ -261,6 +337,8 @@ def test_un_indice_ilegible_no_se_sobrescribe(tmp_path):
     registro = NemoRegistry(working_dir=tmp_path)
     registro.load()
 
+    # Con el índice roto la base se enseña: no es una instalación nueva, y
+    # esconderla escondería lo que tenga dentro.
     assert [n.id for n in registro.list()] == [LEGACY_ID]
     assert destino.read_text(encoding="utf-8") == "{ esto no es json"
 
@@ -313,7 +391,7 @@ def test_ensure_registra_el_workspace_del_servidor(registry):
 
     assert nemo.id == "Obra_Norte"
     assert registry.default_id == "Obra_Norte"
-    assert [n.id for n in registry.list()] == [LEGACY_ID, "Obra_Norte"]
+    assert [n.id for n in registry.list()] == ["Obra_Norte"]
 
 
 def test_ensure_es_idempotente(registry):
@@ -321,7 +399,9 @@ def test_ensure_es_idempotente(registry):
     segundo = registry.ensure("Obra", name="Otro nombre")
 
     assert segundo.name == primero.name  # no renombra lo ya registrado
-    assert len(registry.list()) == 2
+    assert [n.id for n in registry.list()] == ["Obra"]
+    # Con la base oculta, la adoptada es la que responde por defecto.
+    assert registry.default_id == "Obra"
 
 
 def test_ensure_rechaza_un_identificador_con_fuga_de_ruta(registry):

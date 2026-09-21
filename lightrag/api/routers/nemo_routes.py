@@ -339,6 +339,78 @@ def create_nemo_routes(
             ),
         )
 
+    @router.delete(
+        "/bimnemo/nemos",
+        response_model=DeleteNemoResponse,
+        dependencies=[Depends(combined_auth)],
+        summary="Borrar una memoria, indicándola por parámetro",
+    )
+    async def delete_nemo_por_parametro(
+        request: DeleteNemoRequest,
+        nemo: str = Query(
+            default="",
+            description=(
+                "Identificador de la memoria. Vacío o ausente: la memoria base."
+            ),
+        ),
+    ) -> DeleteNemoResponse:
+        """Borrar indicando la memoria por ``?nemo=``, como todo lo demás.
+
+        Existe por la memoria base, que tiene el identificador vacío y no cabe
+        en una ruta. Para las demás hace lo mismo que la ruta con el
+        identificador en el camino.
+
+        ## La base no se quita: se oculta, y solo vacía
+
+        Es el espacio de trabajo por defecto del motor, así que no puede
+        desaparecer. «Borrarla» es ocultarla y devolverle su nombre de
+        fábrica; si no queda ninguna otra, la interfaz vuelve a pedir la
+        primera memoria.
+
+        **Se niega si todavía tiene documentos.** Su carpeta es la raíz de los
+        datos, donde también están las de las demás memorias, así que aquí no
+        se borra ningún fichero: vaciarla es ``DELETE /documents``, que sabe
+        qué es suyo. Ocultarla con documentos dentro los dejaría escondidos,
+        y reaparecerían en cuanto se le pusiera nombre a la primera memoria.
+        """
+        if nemo:
+            return await delete_nemo(nemo, request)
+
+        base = registry.get("")
+        if base is None or base.hidden:
+            raise HTTPException(status_code=404, detail="No hay memoria base que borrar.")
+        if request.confirm_name.strip() != base.name:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "El nombre de confirmación no coincide. Escribe "
+                    f"{base.name!r} para borrarla."
+                ),
+            )
+
+        instancia = await manager.get("")
+        cuenta = await instancia.doc_status.get_status_counts()
+        documentos = sum(int(n or 0) for n in cuenta.values())
+        if documentos:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"La memoria {base.name!r} todavía tiene {documentos} "
+                    "documento(s). Vacíala antes (DELETE /documents)."
+                ),
+            )
+
+        try:
+            registry.delete("")
+        except NemoError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        return DeleteNemoResponse(
+            deleted=base.name,
+            files_removed=False,
+            message=f"Memoria {base.name!r} borrada.",
+        )
+
     # -- Métricas de todas las NEMO ---------------------------------------
 
     def _nemo_paths(nemo_id: str) -> tuple[Path, frozenset[str]]:

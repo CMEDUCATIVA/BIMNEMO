@@ -68,6 +68,7 @@ def test_solo_cuenta_como_nueva_la_de_fabrica_vacia():
     from lightrag.api.bimnemo.nativo.bienvenida import es_nueva
 
     general = [{"id": "", "name": "General"}]
+    assert es_nueva([], 0), "sin ninguna memoria a la vista"
     assert es_nueva(general, 0)
     assert not es_nueva(general, 1), "con documentos no hay nada que estrenar"
     assert not es_nueva([{"id": "", "name": "Obra Norte"}], 0), "ya tiene nombre"
@@ -169,3 +170,40 @@ def test_ahora_no_lo_cierra_y_devuelve_la_ventana(ventana):
 
     assert cuadro.isHidden()
     assert ventana.centralWidget().isEnabled()
+
+
+def test_sale_sin_ninguna_memoria(ventana):
+    """Instalación nueva: la base existe oculta y la lista llega vacía."""
+    assert not _abrir(ventana, {"nemos": [], "default": ""}).isHidden()
+
+
+def test_vuelve_al_borrar_la_ultima_memoria(ventana):
+    cuadro = ventana.bienvenida
+    assert cuadro.isHidden()
+
+    ventana.motor.respuestas["/bimnemo/nemos"] = {"nemos": [], "default": ""}
+    ventana.memorias.cargar()
+
+    assert not cuadro.isHidden()
+
+
+def test_ahora_no_se_respeta_mientras_la_lista_siga_vacia(ventana):
+    ventana.motor.respuestas["/bimnemo/nemos"] = {"nemos": [], "default": ""}
+    ventana.memorias.cargar()
+    ventana.bienvenida.boton_luego.click()
+
+    ventana.memorias.cargar()  # un refresco cualquiera
+
+    assert ventana.bienvenida.isHidden()
+
+
+def test_vuelve_limpio(ventana):
+    cuadro = _abrir(ventana)
+    cuadro.nombre.setText("Obra Norte")
+    cuadro.aviso.informar("Esperando a que el motor vuelva…")
+    cuadro.cerrar()
+
+    cuadro.mostrar()
+
+    assert cuadro.nombre.text() == ""
+    assert cuadro.aviso.text() == ""

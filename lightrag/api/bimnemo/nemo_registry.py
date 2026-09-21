@@ -72,15 +72,22 @@ class Nemo:
     id: str  # workspace real; "" es la heredada
     name: str  # lo que ve el usuario
     created_at: str  # ISO 8601, UTC
-    protected: bool = False  # no se puede borrar
+    protected: bool = False  # es la memoria base
+    #: Solo la base puede estar oculta. Existe por dentro —el motor necesita
+    #: un espacio de trabajo por defecto— pero no se enseña: es el estado de
+    #: una instalación sin estrenar, y el de después de borrar «General».
+    hidden: bool = False
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        datos = {
             "id": self.id,
             "name": self.name,
             "created_at": self.created_at,
             "protected": self.protected,
         }
+        if self.hidden:
+            datos["hidden"] = True
+        return datos
 
 
 def _now() -> str:
@@ -152,7 +159,14 @@ class NemoRegistry:
                 if isinstance(stored_default, str) and stored_default in self._nemos:
                     self._default_id = stored_default
 
-            self._ensure_legacy()
+            # Sin índice **y** sin datos en la base es una instalación nueva:
+            # no hay ninguna memoria que enseñar, y la primera la nombra el
+            # usuario. Con datos se enseña aunque falte el índice: un índice
+            # perdido no puede esconder los documentos de nadie.
+            # Un índice que existe pero no se lee NO es una instalación nueva:
+            # ahí la base se enseña, que es lo prudente.
+            nuevo = not self.path.is_file() and not self._base_con_datos()
+            self._ensure_legacy(oculta=nuevo)
 
     def _load_entries(self, entries: Iterable[Any]) -> None:
         for entry in entries:
@@ -176,9 +190,10 @@ class NemoRegistry:
                 name=name[:MAX_NAME_LENGTH],
                 created_at=entry.get("created_at") or _now(),
                 protected=bool(entry.get("protected")) or nemo_id == LEGACY_ID,
+                hidden=nemo_id == LEGACY_ID and bool(entry.get("hidden")),
             )
 
-    def _ensure_legacy(self) -> None:
+    def _ensure_legacy(self, oculta: bool = False) -> None:
         """La NEMO heredada existe siempre y no se puede borrar.
 
         Es el workspace vacío, es decir el ``working_dir`` raíz: ahí vive todo
@@ -191,9 +206,26 @@ class NemoRegistry:
                 name=LEGACY_NAME,
                 created_at=_now(),
                 protected=True,
+                hidden=oculta,
             )
         if self._default_id not in self._nemos:
             self._default_id = LEGACY_ID
+
+    def _base_con_datos(self) -> bool:
+        """¿Tiene documentos la memoria base?
+
+        Se mira el estado de los documentos, que es la verdad del motor, y no
+        si hay ficheros: un almacén vacío sigue dejando sus ficheros ``{}``.
+        Ante la duda se responde que sí: equivocarse por ese lado enseña una
+        memoria vacía; por el otro, esconde los documentos de alguien.
+        """
+        estado = Path(self.working_dir) / "kv_store_doc_status.json"
+        if not estado.is_file():
+            return False
+        try:
+            return bool(json.loads(estado.read_text(encoding="utf-8") or "{}"))
+        except (OSError, ValueError):
+            return True
 
     def save(self) -> None:
         """Escribe el índice de forma atómica."""
@@ -201,7 +233,7 @@ class NemoRegistry:
             payload = {
                 "version": REGISTRY_VERSION,
                 "default": self._default_id,
-                "nemos": [n.to_payload() for n in self._ordered()],
+                "nemos": [n.to_payload() for n in self._todas()],
             }
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,12 +246,16 @@ class NemoRegistry:
 
     # -- Consulta ----------------------------------------------------------
 
-    def _ordered(self) -> list[Nemo]:
-        """La heredada primero; el resto por nombre, sin distinguir mayúsculas."""
+    def _todas(self) -> list[Nemo]:
+        """Todas, la base primero, oculta o no; el resto por nombre."""
         others = [n for n in self._nemos.values() if n.id != LEGACY_ID]
         others.sort(key=lambda n: n.name.lower())
         legacy = self._nemos.get(LEGACY_ID)
         return ([legacy] if legacy else []) + others
+
+    def _ordered(self) -> list[Nemo]:
+        """Las que se enseñan: todas menos la base si está oculta."""
+        return [n for n in self._todas() if not n.hidden]
 
     def list(self) -> list[Nemo]:
         with self._lock:
@@ -240,6 +276,18 @@ class NemoRegistry:
     def default_id(self) -> str:
         with self._lock:
             return self._default_id
+
+    def _default_visible(self) -> None:
+        """Si la por defecto está oculta y hay otra a la vista, pasa a ésa.
+
+        Una petición sin memoria iría si no a una base vacía e invisible, y
+        quien consulta por la API recibiría «no hay nada» teniendo memorias.
+        """
+        actual = self._nemos.get(self._default_id)
+        if actual is not None and not actual.hidden:
+            return
+        visibles = self._ordered()
+        self._default_id = visibles[0].id if visibles else LEGACY_ID
 
     def resolve(self, requested: str | None) -> str:
         """Identificador de NEMO a usar para una petición.
@@ -300,6 +348,8 @@ class NemoRegistry:
             # también saltaría: «ya existe una NEMO llamada así» le dice al
             # usuario qué ha pasado, y «ocuparía la misma carpeta» no.
             for existing in self._nemos.values():
+                if existing.hidden:
+                    continue
                 if existing.name.strip().lower() == clean_name.lower():
                     raise NemoError(f"Ya existe una NEMO llamada {clean_name!r}.")
             for existing in self._nemos.values():
@@ -311,6 +361,7 @@ class NemoRegistry:
 
             nemo = Nemo(id=nemo_id, name=clean_name, created_at=_now())
             self._nemos[nemo_id] = nemo
+            self._default_visible()
 
         self.save()
         logger.info("BIMNEMO: NEMO creada %r (workspace %r)", clean_name, nemo_id)
@@ -349,6 +400,7 @@ class NemoRegistry:
                 self._nemos[nemo_id] = nemo
             if default:
                 self._default_id = nemo_id
+            self._default_visible()
 
         self.save()
         return nemo
@@ -375,14 +427,17 @@ class NemoRegistry:
             for existing in self._nemos.values():
                 if (
                     existing.id != nemo_id
+                    and not existing.hidden
                     and existing.name.strip().lower() == clean_name.lower()
                 ):
                     raise NemoError(f"Ya existe una NEMO llamada {clean_name!r}.")
 
+            # Ponerle nombre a la base oculta es crear la primera memoria:
+            # vuelve a verse, con el nombre que eligió el usuario.
             renamed = Nemo(
                 id=nemo.id,
                 name=clean_name,
-                created_at=nemo.created_at,
+                created_at=_now() if nemo.hidden else nemo.created_at,
                 protected=nemo.protected,
             )
             self._nemos[nemo_id] = renamed
@@ -399,15 +454,26 @@ class NemoRegistry:
         """
         with self._lock:
             nemo = self._nemos.get(nemo_id)
-            if nemo is None:
+            if nemo is None or nemo.hidden:
                 raise NemoError(f"No existe la NEMO {nemo_id!r}.")
-            if nemo.protected:
-                raise NemoError(
-                    f"La NEMO {nemo.name!r} no se puede borrar: es la memoria base."
+            if nemo_id == LEGACY_ID:
+                # La base no se puede quitar de verdad: es el espacio de
+                # trabajo por defecto del motor. Se oculta y vuelve a su
+                # nombre de fábrica, que es lo que el usuario ve como
+                # «borrada». **Vaciarla antes es cosa de quien llama**: esto
+                # solo toca el índice.
+                self._nemos[LEGACY_ID] = Nemo(
+                    id=LEGACY_ID,
+                    name=LEGACY_NAME,
+                    created_at=nemo.created_at,
+                    protected=True,
+                    hidden=True,
                 )
-            del self._nemos[nemo_id]
+            else:
+                del self._nemos[nemo_id]
             if self._default_id == nemo_id:
                 self._default_id = LEGACY_ID
+            self._default_visible()
 
         self.save()
         logger.info("BIMNEMO: NEMO eliminada del índice %r", nemo_id)

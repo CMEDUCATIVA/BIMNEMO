@@ -85,11 +85,24 @@ def test_cambiar_de_memoria_en_el_selector_cambia_la_del_motor(ventana):
     assert ventana.motor.memoria == "obra-sur"
 
 
-def test_la_memoria_base_no_ofrece_el_boton_de_borrar(ventana):
-    assert ventana.barra.boton_borrar.isEnabled() is False
+def test_la_memoria_base_tambien_se_puede_borrar(ventana):
+    """Quien la ve en la lista tiene que poder quitarla: el usuario la
+    encuentra limpia o la deja limpia."""
+    assert ventana.barra.boton_borrar.isEnabled() is True
 
     ventana.barra._elegida(ventana.barra.selector.findData("obra-sur"))
     assert ventana.barra.boton_borrar.isEnabled() is True
+
+
+def test_sin_memorias_no_hay_nada_que_renombrar_ni_borrar(ventana):
+    ventana.motor.respuestas["/bimnemo/nemos"] = {"nemos": [], "default": ""}
+    ventana.memorias.cargar()
+
+    barra = ventana.barra
+    assert barra.selector.currentText() == "Sin memorias"
+    assert not barra.selector.isEnabled()
+    assert not barra.boton_renombrar.isEnabled()
+    assert not barra.boton_borrar.isEnabled()
 
 
 def test_cambiar_de_memoria_relee_las_pantallas(ventana):

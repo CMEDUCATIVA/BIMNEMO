@@ -186,20 +186,20 @@ class BarraSuperior(QFrame):
                     "· Es la memoria por defecto: la que se abre al arrancar",
                     Qt.ToolTipRole,
                 )
+        # Sin ninguna memoria —instalación nueva, o después de borrar la
+        # última— el selector lo dice en vez de quedarse en blanco, y no hay
+        # nada que renombrar ni que borrar.
+        hay = bool(self.memorias.nemos)
+        if not hay:
+            self.selector.addItem("Sin memorias", None)
+        self.selector.setEnabled(hay)
+        self.boton_renombrar.setEnabled(hay)
+        self.boton_borrar.setEnabled(hay)
+
         indice = self.selector.findData(self.memorias.actual)
-        if indice >= 0:
+        if indice >= 0 and hay:
             self.selector.setCurrentIndex(indice)
         self.selector.blockSignals(False)
-
-        # La memoria base no se puede borrar. El botón lo dice antes de
-        # pulsarlo, en vez de abrir un diálogo para negarse.
-        protegida = bool(self.memorias.ficha().get("protected"))
-        self.boton_borrar.setEnabled(not protegida)
-        self.boton_borrar.setToolTip(
-            "La memoria base no se puede borrar"
-            if protegida
-            else "Borrar la memoria abierta"
-        )
 
     def _elegida(self, indice: int) -> None:
         self.memorias.elegir(str(self.selector.itemData(indice) or ""))

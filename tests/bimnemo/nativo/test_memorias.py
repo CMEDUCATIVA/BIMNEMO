@@ -212,15 +212,43 @@ def test_borrar_exige_el_nombre_exacto(ajustes_aparte):
     assert dialogo.aceptar.isEnabled() is True
 
 
-def test_la_memoria_base_no_ofrece_borrarse(ajustes_aparte):
-    """Se dice en el mismo sitio donde se iba a borrar, no en otra ventana."""
+def test_la_memoria_base_se_vacia_y_despues_se_quita(ajustes_aparte):
+    """En ese orden: con documentos dentro, el motor se niega a quitarla."""
     from lightrag.api.bimnemo.nativo.memorias import DialogoBorrar
 
-    dialogo = DialogoBorrar(
-        MotorFalso(), {"id": "", "name": "General", "protected": True}
-    )
-    assert hasattr(dialogo, "campo") is False
-    assert dialogo.aceptar.isHidden() is True
+    motor = MotorFalso()
+    # Una respuesta para todo: el vaciado mira `status`, y al quitarla del
+    # índice solo importa que conteste.
+    motor.respuesta = {"status": "success", "message": "vaciada"}
+    dialogo = DialogoBorrar(motor, {"id": "", "name": "General", "protected": True})
+    dialogo.campo.setText("General")
+    dialogo._borrar()
+
+    borrados = [ruta for verbo, ruta in motor.pedidos if verbo == "DELETE"]
+    assert borrados == [
+        "/documents?delete_parsed_files=true&clear_llm_cache=true",
+        "/bimnemo/nemos?nemo=",
+    ]
+    assert dialogo.borrada is True
+
+
+def test_si_no_se_puede_vaciar_la_base_no_se_quita(ajustes_aparte):
+    """Un vaciado a medias —el motor indexando, por ejemplo— para aquí."""
+    from lightrag.api.bimnemo.nativo.memorias import DialogoBorrar
+
+    motor = MotorFalso()
+    motor.respuesta = {
+        "status": "busy",
+        "message": "El motor está procesando documentos.",
+    }
+    dialogo = DialogoBorrar(motor, {"id": "", "name": "General", "protected": True})
+    dialogo.campo.setText("General")
+    dialogo._borrar()
+
+    borrados = [ruta for verbo, ruta in motor.pedidos if verbo == "DELETE"]
+    assert "/bimnemo/nemos?nemo=" not in borrados
+    assert dialogo.borrada is False
+    assert dialogo.aceptar.isEnabled()
 
 
 def test_borrar_manda_el_nombre_como_resguardo(ajustes_aparte):
