@@ -169,6 +169,46 @@ def hoja(p: Paleta) -> str:
         border: 1px solid {p.borde};
         border-radius: 12px;
     }}
+    #subtitulo {{
+        color: {p.texto};
+        font-size: 15px;
+        font-weight: 600;
+    }}
+    #dato-nombre {{ color: {p.texto_3}; }}
+    #dato-valor  {{ color: {p.texto}; }}
+    /* Las filas son cajas para colocar, no superficies. Sin esto pintan el
+       fondo general **dentro** de la tarjeta y la dejan a rayas. */
+    #fila {{ background: transparent; }}
+
+    /* Los tres tonos del aviso. El color lo decide la propiedad `tono`, que
+       la pieza cambia en caliente — por eso hay que repintar el estilo a
+       mano después, cosa que `Aviso` ya hace. */
+    #aviso {{
+        border-radius: {RADIO}px;
+        padding: 9px 12px;
+    }}
+    #aviso[tono="info"] {{
+        background: {p.azul_suave};
+        color: {p.azul};
+    }}
+    #aviso[tono="bien"] {{
+        background: rgba(22, 163, 74, 0.16);
+        color: #4ade80;
+    }}
+    #aviso[tono="mal"] {{
+        background: rgba(220, 38, 38, 0.14);
+        color: #f87171;
+    }}
+
+    QProgressBar {{
+        background: {p.secundaria};
+        border: none;
+        border-radius: 3px;
+    }}
+    QProgressBar::chunk {{
+        background: {p.azul};
+        border-radius: 3px;
+    }}
 
     /* --- Controles ------------------------------------------------------ */
     QPushButton {{

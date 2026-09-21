@@ -497,10 +497,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         else:
-            try:
-                return nativo.abrir(base_url, BIMNEMO_VERSION)
-            finally:
-                _shutdown(server)
+            return _con_ventana_nativa(nativo, base_url, args, server)
 
     chromium = find_chromium(args.chromium)
     if chromium is None:
@@ -544,6 +541,64 @@ def main(argv: list[str] | None = None) -> int:
 MAX_CONSECUTIVE_FAILURES = 3
 FAST_FAILURE_SECONDS = 20.0
 SUPERVISE_POLL_SECONDS = 0.5
+
+
+class _CentinelaNativo:
+    """Hace pasar la ventana nativa por un proceso ante el supervisor.
+
+    `supervise` vigila la ventana preguntándole `poll()`, porque con la
+    ventana de navegador la ventana **es** un proceso aparte. La nativa vive
+    dentro de este mismo proceso, así que se le da algo con la misma forma.
+
+    Es un adaptador de cinco líneas, y la alternativa era duplicar el
+    supervisor entero para cambiar una condición del bucle.
+    """
+
+    def __init__(self) -> None:
+        self._vivo = True
+
+    def poll(self) -> int | None:
+        return None if self._vivo else 0
+
+    def terminate(self) -> None:
+        self._vivo = False
+
+
+def _con_ventana_nativa(nativo, base_url: str, args, server) -> int:
+    """Abre la ventana nativa con el motor supervisado por detrás.
+
+    **Sin esto el reinicio del motor no funciona**: la pantalla de
+    configuración mata el proceso del motor a propósito, y si nadie lo
+    levanta de nuevo la aplicación se queda sin motor para siempre. El
+    supervisor va en un hilo porque Qt necesita el principal para sí.
+    """
+    import threading
+
+    from lightrag.api.bimnemo import BIMNEMO_VERSION
+
+    centinela = _CentinelaNativo()
+    # En una caja para que el hilo pueda dejar ahí el motor vigente: tras un
+    # reinicio, el que hay que cerrar al salir ya no es el de antes.
+    caja = {"server": server}
+
+    def vigilar() -> None:
+        caja["server"] = supervise(
+            centinela,
+            server,
+            args.host,
+            args.port,
+            quiet=not args.consola,
+        )
+
+    hilo = threading.Thread(target=vigilar, name="bimnemo-supervisor", daemon=True)
+    hilo.start()
+
+    try:
+        return nativo.abrir(base_url, BIMNEMO_VERSION)
+    finally:
+        centinela.terminate()
+        hilo.join(timeout=5)
+        _shutdown(caja["server"])
 
 
 def supervise(
