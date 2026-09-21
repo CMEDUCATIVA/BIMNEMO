@@ -69,6 +69,56 @@ OSCURO = Paleta(
     borde_medio="#334155",
 )
 
+#: Los ocho colores de categoría del Lookbook, con su fondo suave al 12 %.
+#: Son los `--cat-*` de `tokens.css`; la web los resuelve por `data-color` y
+#: aquí se buscan por la misma clave que manda `GET /bimnemo/catalog`.
+CATEGORIA: dict[str, tuple[str, str]] = {
+    "sky": ("#0ea5e9", "rgba(14, 165, 233, 0.12)"),
+    "violet": ("#8b5cf6", "rgba(139, 92, 246, 0.12)"),
+    "emerald": ("#10b981", "rgba(16, 185, 129, 0.12)"),
+    "orange": ("#f97316", "rgba(249, 115, 22, 0.12)"),
+    "teal": ("#14b8a6", "rgba(20, 184, 166, 0.12)"),
+    "rose": ("#f43f5e", "rgba(244, 63, 94, 0.12)"),
+    "amber": ("#f59e0b", "rgba(245, 158, 11, 0.12)"),
+    "slate": ("#64748b", "rgba(100, 116, 139, 0.12)"),
+}
+
+#: El azul de «trabajando», que comparten los tres estados en los que el
+#: motor está leyendo el documento.
+_OCUPADO = ("#0ea5e9", "rgba(14, 165, 233, 0.12)")
+
+#: Estados con color propio. Los demás son neutros y dependen de la paleta,
+#: así que se resuelven en `color_estado`.
+_ESTADOS: dict[str, tuple[str, str]] = {
+    "processed": ("#10b981", "rgba(16, 185, 129, 0.12)"),
+    "failed": ("#ef4444", "rgba(239, 68, 68, 0.12)"),
+    "pending": ("#f59e0b", "rgba(245, 158, 11, 0.12)"),
+    "parsing": _OCUPADO,
+    "analyzing": _OCUPADO,
+    "processing": _OCUPADO,
+}
+
+
+def color_categoria(token: str) -> tuple[str, str]:
+    """El par (color, fondo) de una categoría. Lo que no conozca, gris."""
+    return CATEGORIA.get(token, CATEGORIA["slate"])
+
+
+def color_estado(p: Paleta, estado: str) -> tuple[str, str]:
+    """El par (color, fondo) de un estado del motor.
+
+    «Borrando» va en gris a propósito, igual que en la web: no es un error
+    ni un aviso, es trabajo en marcha que termina con la fila desapareciendo,
+    y teñir la tabla de rojo por un borrado que el usuario acaba de pedir
+    asusta sin motivo.
+    """
+    if estado in _ESTADOS:
+        return _ESTADOS[estado]
+    if estado == "deleting":
+        return (p.texto_2, p.terciaria)
+    return (p.texto_3, p.secundaria)
+
+
 #: Medidas. Las mismas proporciones que la interfaz web.
 ANCHO_LATERAL = 232
 ALTO_BARRA = 56
@@ -248,6 +298,25 @@ def hoja(p: Paleta) -> str:
     QComboBox:focus, QLineEdit:focus {{ border-color: {p.azul}; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
 
+    /* --- Panel y barra del grafo ---------------------------------------- */
+    #rotulo-campo {{
+        color: {p.texto_3};
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+    }}
+    QPushButton#icono {{
+        background: transparent;
+        border: 1px solid {p.borde_medio};
+        border-radius: {RADIO}px;
+        padding: 0;
+    }}
+    QPushButton#icono:hover {{
+        background: {p.secundaria};
+        border-color: {p.azul};
+    }}
+
     /* --- API ------------------------------------------------------------ */
     #ruta, #codigo {{
         font-family: "Cascadia Mono", Consolas, monospace;
@@ -300,7 +369,79 @@ def hoja(p: Paleta) -> str:
     }}
     QPlainTextEdit#entrada:focus {{ border-color: {p.azul}; }}
 
+    /* --- Zona de arrastre ----------------------------------------------- */
+    /* El borde discontinuo es lo que dice «aquí se suelta» sin una palabra.
+       Al arrastrar algo por encima se enciende: sin esa respuesta no se sabe
+       si el sitio es válido hasta que ya se ha soltado. */
+    #zona {{
+        background: {p.elevada};
+        border: 1px dashed {p.borde_medio};
+        border-radius: 12px;
+    }}
+    #zona[encima="si"] {{
+        background: {p.azul_suave};
+        border-color: {p.azul};
+    }}
+    #zona-titulo {{
+        color: {p.texto};
+        font-size: 14px;
+        font-weight: 600;
+    }}
+    #zona-cuenta {{
+        color: {p.texto_2};
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    #zona-formatos {{
+        color: {p.texto_3};
+        font-size: 11px;
+    }}
+
+    /* --- Filtros por categoría ------------------------------------------ */
+    QPushButton#chip {{
+        background: transparent;
+        border: 1px solid {p.borde_medio};
+        border-radius: 13px;
+        color: {p.texto_2};
+        font-size: 12px;
+        padding: 4px 12px;
+    }}
+    QPushButton#chip:hover {{ background: {p.secundaria}; }}
+    QPushButton#chip:checked {{
+        background: {p.azul_suave};
+        border-color: {p.azul};
+        color: {p.azul};
+        font-weight: 600;
+    }}
+
     /* --- Tabla de archivos --------------------------------------------- */
+    /* La pista de la cabecera: qué memoria se mira y cuántas filas de
+       cuántas, que es lo que cambia al filtrar. */
+    #pista {{
+        color: {p.texto_3};
+        font-size: 12px;
+    }}
+    /* La barra de avance vive DENTRO de la celda de estado, no en un
+       recuadro aparte: es lo que contesta «¿está parado?» justo donde se
+       está mirando. Fina y sin número encima; el número va al lado. */
+    QProgressBar#avance {{
+        background: {p.secundaria};
+        border: none;
+        border-radius: 2px;
+        max-height: 4px;
+        min-height: 4px;
+    }}
+    QProgressBar#avance::chunk {{
+        background: {p.azul};
+        border-radius: 2px;
+    }}
+    QProgressBar#avance[parado="si"]::chunk {{ background: {p.texto_3}; }}
+    #avance-texto {{
+        color: {p.texto_3};
+        font-size: 10px;
+    }}
+
+
     QTableWidget#tabla {{
         background: transparent;
         border: none;

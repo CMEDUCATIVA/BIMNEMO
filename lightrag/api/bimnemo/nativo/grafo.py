@@ -22,6 +22,7 @@ ventilador encendido para no mover nada.
 from __future__ import annotations
 
 import math
+import unicodedata
 from typing import Any, Optional
 
 import numpy as np
@@ -36,6 +37,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget
 
+from lightrag.api.bimnemo.nativo import disposicion
+
 # --- Constantes de la simulación, copiadas de `grafo-lienzo.js` -------------
 
 REPULSION = 2400.0  # Empuje entre nodos; subirlo abre el grafo.
@@ -46,6 +49,18 @@ DAMPING = 0.82  # Rozamiento; sin él el grafo oscila y no se asienta.
 ALPHA_DECAY = 0.984
 ALPHA_MIN = 0.008
 MAX_STEP = 40.0  # Tope de desplazamiento por paso, contra explosiones.
+
+# Force Atlas reparte distinto: la repulsión crece con el número de relaciones
+# de CADA extremo, así que los concentradores se apartan entre sí y arrastran a
+# sus vecinos; y la atracción es lineal con la distancia, sin longitud en
+# reposo. El resultado son cúmulos marcados en vez del reparto parejo de las
+# fuerzas normales.
+#
+# Las dos constantes están calibradas para que un par unido se equilibre en
+# `10 * raíz((ga+1)(gb+1))` píxeles. Con los valores «naturales» de la fórmula,
+# la repulsión salía cien veces mayor que la atracción y el grafo se deshacía.
+ATLAS_REPULSION = 2.0
+ATLAS_ATTRACTION = 0.02
 
 #: Cuántas entidades llevan rótulo, de más conectadas a menos. Con todas, un
 #: grafo mediano se convierte en una mancha de texto; sin ninguna, es un
@@ -95,6 +110,11 @@ class Grafo(QWidget):
         self._pos: np.ndarray = np.zeros((0, 2))
         self._vel: np.ndarray = np.zeros((0, 2))
         self._con_rotulo: set[int] = set()
+        self._grados: np.ndarray = np.zeros(0)
+        self._tipos: list[tuple[str, int, QColor]] = []
+        self._disposicion = "fuerzas"
+        self._resaltados: set[int] = set()
+        self._vecinos: set[int] = set()
 
         self._alpha = 0.0
         self._vista = [0.0, 0.0, 1.0]  # desplazamiento x, y, y escala
@@ -132,20 +152,49 @@ class Grafo(QWidget):
         self._color = [del_tipo[str(n.get("type") or "—")] for n in self._nodos]
 
         grados = [int(n.get("degree") or 0) for n in self._nodos]
+        self._grados = np.array(grados, dtype=float)
         self._radio = np.array([radio_de(g) for g in grados], dtype=float)
         self._con_rotulo = set(
             sorted(range(len(grados)), key=lambda i: -grados[i])[:ROTULADAS]
         )
+        # La leyenda de abajo: tipo, cuántos hay y de qué color se pintan.
+        self._tipos = [(t, cuenta[t], del_tipo[t]) for t in orden]
 
         self._repartir()
         self._elegido = None
         self._encima = None
-        self._alpha = 1.0
-        if self._nodos:
-            self._reloj.start()
-        else:
-            self._reloj.stop()
+        self._resaltados = set()
+        self._vecinos = set()
+        self._colocar()
         self.update()
+
+    def tipos(self) -> list[tuple[str, int, QColor]]:
+        """Lo que necesita la leyenda: tipo, cuántos y su color."""
+        return list(self._tipos)
+
+    def disponer(self, clave: str) -> None:
+        """Cambia la disposición y recoloca."""
+        self._disposicion = clave
+        self._colocar()
+        self.encuadrar()
+        self.update()
+
+    def _colocar(self) -> None:
+        """Aplica la disposición elegida.
+
+        Las fijas colocan y apagan la simulación; las de simulación la
+        encienden y dejan que el grafo se asiente solo.
+        """
+        if not self._nodos:
+            self._reloj.stop()
+            return
+        if disposicion.aplicar(self._disposicion, self._nodos, self._pos):
+            self._vel[:] = 0.0
+            self._alpha = 0.0
+            self._reloj.stop()
+            return
+        self._alpha = 1.0
+        self._reloj.start()
 
     def _repartir(self) -> None:
         """Posiciones de partida en espiral.
@@ -187,14 +236,28 @@ class Grafo(QWidget):
         # primer fotograma pasa más de lo que parece.
         np.fill_diagonal(dist2, np.inf)
         dist2 = np.maximum(dist2, 1.0)
-        escala = REPULSION / (dist2 * np.sqrt(dist2))
+        atlas = self._disposicion == "atlas"
+        if atlas:
+            # La repulsión crece con las relaciones de cada extremo: los
+            # concentradores se apartan y arrastran a sus vecinos.
+            peso = (self._grados + 1.0)
+            escala = (
+                ATLAS_REPULSION * peso[:, None] * peso[None, :]
+            ) / (dist2 * np.sqrt(dist2))
+        else:
+            escala = REPULSION / (dist2 * np.sqrt(dist2))
+        np.fill_diagonal(escala, 0.0)
         fuerza += np.sum(delta * escala[:, :, None], axis=1)
 
         # Muelles de las aristas.
         for a, b in self._aristas:
             d = pos[b] - pos[a]
             largo = float(np.hypot(d[0], d[1])) or 0.01
-            tiron = SPRING * (largo - SPRING_LEN) / largo
+            # En Atlas la atracción es lineal con la distancia y sin longitud
+            # en reposo: por eso hace cúmulos en vez de repartir parejo.
+            tiron = (
+                ATLAS_ATTRACTION if atlas else SPRING * (largo - SPRING_LEN) / largo
+            )
             fuerza[a] += d * tiron
             fuerza[b] -= d * tiron
 
@@ -238,6 +301,61 @@ class Grafo(QWidget):
         ]
         self.update()
 
+    def acercar(self, factor: float = 1.25) -> None:
+        """Zoom desde el botón: sobre el centro del lienzo, no sobre el ratón."""
+        centro = QPointF(self.width() / 2.0, self.height() / 2.0)
+        antes = self._a_mundo(centro)
+        self._vista[2] = max(0.05, min(6.0, self._vista[2] * factor))
+        despues = self._a_mundo(centro)
+        self._vista[0] += (despues[0] - antes[0]) * self._vista[2]
+        self._vista[1] += (despues[1] - antes[1]) * self._vista[2]
+        self.update()
+
+    def alejar(self) -> None:
+        self.acercar(1 / 1.25)
+
+    @staticmethod
+    def _sin_tildes(texto: str) -> str:
+        """Para comparar nombres sin que una tilde decida el resultado.
+
+        Buscar «modulo» y no encontrar «Módulo Reuniones» es, en castellano,
+        una búsqueda rota: nadie escribe las tildes al buscar. Comprobado
+        antes de arreglarlo: daba **cero** resultados con el grafo lleno de
+        entidades que empiezan por «Módulo».
+        """
+        descompuesto = unicodedata.normalize("NFD", texto.lower())
+        return "".join(c for c in descompuesto if unicodedata.category(c) != "Mn")
+
+    def resaltar(self, texto: str) -> int:
+        """Marca las entidades cuyo nombre contenga `texto`. Devuelve cuántas.
+
+        Resaltar y no filtrar: quitar de la vista lo que no casa deja un
+        grafo sin contexto, y el contexto es justo lo que se está mirando.
+        """
+        aguja = self._sin_tildes((texto or "").strip())
+        if not aguja:
+            self._resaltados = set()
+        else:
+            self._resaltados = {
+                i
+                for i, n in enumerate(self._nodos)
+                if aguja
+                in self._sin_tildes(str(n.get("label") or n.get("id") or ""))
+            }
+        self.update()
+        return len(self._resaltados)
+
+    def _aislar(self, indice: Optional[int]) -> None:
+        """Los vecinos del nodo elegido, para poder apagar el resto."""
+        if indice is None:
+            self._vecinos = set()
+            return
+        self._vecinos = {indice} | {
+            b if a == indice else a
+            for a, b in self._aristas
+            if indice in (a, b)
+        }
+
     def _a_pantalla(self, punto: np.ndarray) -> QPointF:
         x, y, k = self._vista
         return QPointF(punto[0] * k + x, punto[1] * k + y)
@@ -276,10 +394,17 @@ class Grafo(QWidget):
 
         k = self._vista[2]
 
-        pluma = QPen(QColor(148, 163, 184, 95))
-        pluma.setWidthF(max(0.6, 1.0 * k))
-        pintor.setPen(pluma)
+        # Con un nodo elegido, sus relaciones se ven y el resto se apaga:
+        # eso es «aislar». Sin apagar nada, elegir no sirve de nada en un
+        # grafo de doscientas entidades.
+        aislando = bool(self._vecinos)
         for a, b in self._aristas:
+            suya = (not aislando) or (a in self._vecinos and b in self._vecinos)
+            pluma = QPen(QColor(148, 163, 184, 150 if suya and aislando else 95))
+            if aislando and not suya:
+                pluma.setColor(QColor(148, 163, 184, 25))
+            pluma.setWidthF(max(0.6, 1.0 * k))
+            pintor.setPen(pluma)
             pintor.drawLine(self._a_pantalla(self._pos[a]), self._a_pantalla(self._pos[b]))
 
         fuente = QFont(self.font())
@@ -291,17 +416,27 @@ class Grafo(QWidget):
             radio = self._radio[i] * k
 
             color = QColor(self._color[i])
+            if aislando and i not in self._vecinos:
+                # Apagado, no escondido: sigue dando forma al conjunto.
+                color.setAlpha(45)
+            pintor.setBrush(color)
+
             if i == self._elegido:
                 pintor.setPen(QPen(QColor("#f1f5f9"), 2.0))
+            elif i in self._resaltados:
+                # El resultado de la búsqueda, con anillo del color de marca.
+                pintor.setPen(QPen(QColor("#3b82f6"), 2.5))
             elif i == self._encima:
                 pintor.setPen(QPen(QColor("#cbd5e1"), 1.5))
             else:
                 pintor.setPen(Qt.NoPen)
-            pintor.setBrush(color)
             pintor.drawEllipse(centro, radio, radio)
 
-            if i in self._con_rotulo and k > 0.35:
-                pintor.setPen(QColor("#cbd5e1"))
+            rotular = i in self._con_rotulo or i in self._resaltados
+            if rotular and k > 0.35:
+                pintor.setPen(
+                    QColor("#93c5fd") if i in self._resaltados else QColor("#cbd5e1")
+                )
                 pintor.drawText(
                     QRectF(centro.x() - 70, centro.y() + radio + 1, 140, 14),
                     Qt.AlignHCenter | Qt.AlignTop,
@@ -328,6 +463,7 @@ class Grafo(QWidget):
         if i is not None:
             self._arrastrando = i
             self._elegido = i
+            self._aislar(i)
             self.elegido.emit(self._nodos[i])
             # Al mover un nodo se recalienta un poco la simulación: si no,
             # el grafo se queda como estaba y el arrastre no sirve de nada.
@@ -337,6 +473,7 @@ class Grafo(QWidget):
         else:
             self._paneando = evento.position()
             self._elegido = None
+            self._aislar(None)
             self.elegido.emit(None)
             self.setCursor(Qt.ClosedHandCursor)
         self.update()

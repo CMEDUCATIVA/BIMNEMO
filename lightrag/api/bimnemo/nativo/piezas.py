@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
     QFrame,
+    QLayout,
     QHBoxLayout,
     QLabel,
     QScrollArea,
@@ -104,6 +105,80 @@ class Aviso(QLabel):
         self.style().unpolish(self)
         self.style().polish(self)
         self.show()
+
+
+class Fluida(QLayout):
+    """Coloca en fila y **salta de línea** cuando no cabe, como el CSS.
+
+    Qt no trae ninguna disposición que envuelva: `QHBoxLayout` aprieta los
+    elementos hasta recortarles el texto. Se vio en la leyenda del grafo, que
+    al estrechar la ventana pasaba de «concepto 79» a «conce 79».
+
+    Es el patrón `FlowLayout` de la documentación de Qt, con los nombres en
+    castellano y sin las opciones que aquí no se usan.
+    """
+
+    def __init__(self, separacion: int = 12, salto: int = 6) -> None:
+        super().__init__()
+        self._piezas: list = []
+        self._separacion = separacion
+        self._salto = salto
+        self.setContentsMargins(0, 0, 0, 0)
+
+    # -- lo que `QLayout` exige --------------------------------------------
+
+    def addItem(self, pieza) -> None:  # noqa: N802 (nombre de Qt)
+        self._piezas.append(pieza)
+
+    def count(self) -> int:
+        return len(self._piezas)
+
+    def itemAt(self, indice: int):  # noqa: N802
+        return self._piezas[indice] if 0 <= indice < len(self._piezas) else None
+
+    def takeAt(self, indice: int):  # noqa: N802
+        if 0 <= indice < len(self._piezas):
+            return self._piezas.pop(indice)
+        return None
+
+    def expandingDirections(self):  # noqa: N802
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, ancho: int) -> int:  # noqa: N802
+        return self._repartir(QRect(0, 0, ancho, 0), medir=True)
+
+    def setGeometry(self, rect) -> None:  # noqa: N802
+        super().setGeometry(rect)
+        self._repartir(rect, medir=False)
+
+    def sizeHint(self):  # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self):  # noqa: N802
+        medida = QSize()
+        for pieza in self._piezas:
+            medida = medida.expandedTo(pieza.minimumSize())
+        return medida
+
+    def _repartir(self, rect, medir: bool) -> int:
+        x, y, alto_fila = rect.x(), rect.y(), 0
+
+        for pieza in self._piezas:
+            ancho = pieza.sizeHint().width()
+            alto = pieza.sizeHint().height()
+            if x + ancho > rect.right() and alto_fila > 0:
+                x = rect.x()
+                y += alto_fila + self._salto
+                alto_fila = 0
+            if not medir:
+                pieza.setGeometry(QRect(QPoint(x, y), pieza.sizeHint()))
+            x += ancho + self._separacion
+            alto_fila = max(alto_fila, alto)
+
+        return y + alto_fila - rect.y()
 
 
 class Pantalla(QWidget):

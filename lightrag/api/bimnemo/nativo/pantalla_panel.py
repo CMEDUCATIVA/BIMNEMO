@@ -1,8 +1,21 @@
-"""Pantalla «Panel»: las cifras de la memoria y su grafo de conocimiento.
+"""Pantalla «Panel»: el grafo a la izquierda y todo lo demás a la derecha.
 
-Las cifras salen de `GET /bimnemo/stats` y `GET /bimnemo/stats/graph`; el
-grafo, de `GET /bimnemo/graph`. El dibujo y la física están en `grafo.py`,
-que no sabe de endpoints: aquí se piden los datos y allí se pintan.
+## Por qué dos columnas
+
+El grafo es lo que se viene a ver y necesita sitio; las cifras y la ficha de
+la entidad elegida son texto y caben en una columna estrecha. En una sola
+columna, la ficha aparecía **debajo del grafo**: al pulsar una entidad había
+que bajar a leerla y se perdía de vista lo que se acababa de pulsar.
+
+Es responsiva: por debajo de `ANCHO_MINIMO_DOS_COLUMNAS` se apilan, porque
+dos columnas en una ventana estrecha son dos columnas ilegibles.
+
+## La barra del grafo
+
+Es la misma de la interfaz web y por los mismos motivos: entidad de partida,
+profundidad, nodos máximos, disposición y búsqueda. Sin ella el grafo es una
+foto fija; con ella se puede preguntar «¿qué hay alrededor de esto?», que es
+para lo que sirve un grafo.
 """
 
 from __future__ import annotations
@@ -12,21 +25,45 @@ from typing import Any, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from lightrag.api.bimnemo.nativo import iconos
+from lightrag.api.bimnemo.nativo.disposicion import DISPOSICIONES
 from lightrag.api.bimnemo.nativo.grafo import Grafo
 from lightrag.api.bimnemo.nativo.motor import Motor
-from lightrag.api.bimnemo.nativo.piezas import Aviso, Pantalla, Tarjeta
+from lightrag.api.bimnemo.nativo.piezas import Aviso, Fluida, Tarjeta
 
-#: Cuántos nodos se piden. Más allá, el grafo deja de leerse y empieza a
-#: pesar: 250 ya es una maraña para un ojo humano.
-TOPES = (60, 120, 250, 500)
+#: Por debajo de esto, las dos columnas se apilan.
+ANCHO_MINIMO_DOS_COLUMNAS = 1120
+
+#: Proporción de la columna del grafo frente a la de datos.
+PESO_GRAFO = 5
+PESO_DATOS = 3
+
+PROFUNDIDADES = ((1, "1 salto"), (2, "2 saltos"), (3, "3 saltos"),
+                 (4, "4 saltos"), (5, "5 saltos"))
+TOPES = (100, 250, 500, 1000)
 TOPE_POR_DEFECTO = 250
+
+#: Las cifras del panel: clave del dato, icono e rótulo.
+CIFRAS = (
+    ("archivos", "ficheros", "Archivos"),
+    ("tamano", "disco", "Almacenado"),
+    ("documentos", "documento", "Documentos"),
+    ("trozos", "trozos", "Trozos"),
+    ("entidades", "entidades", "Entidades"),
+    ("relaciones", "relaciones", "Relaciones"),
+)
 
 
 def _numero(valor: Any) -> str:
@@ -49,14 +86,25 @@ def _tamano(octetos: Any) -> str:
 
 
 class Cifra(QWidget):
-    """Un número grande con su rótulo debajo."""
+    """Un icono, un número grande y su rótulo."""
 
-    def __init__(self, rotulo: str) -> None:
+    def __init__(self, icono_nombre: str, rotulo: str) -> None:
         super().__init__()
         self.setObjectName("fila")
-        columna = QVBoxLayout(self)
+
+        fila = QHBoxLayout(self)
+        fila.setContentsMargins(0, 0, 0, 0)
+        fila.setSpacing(10)
+
+        marca = QLabel()
+        marca.setPixmap(iconos.pixmap(icono_nombre, 20, "#3b82f6"))
+        marca.setFixedWidth(22)
+        marca.setAlignment(Qt.AlignTop)
+        fila.addWidget(marca)
+
+        columna = QVBoxLayout()
         columna.setContentsMargins(0, 0, 0, 0)
-        columna.setSpacing(2)
+        columna.setSpacing(0)
 
         self.valor = QLabel("…")
         self.valor.setObjectName("cifra")
@@ -66,104 +114,239 @@ class Cifra(QWidget):
         etiqueta.setObjectName("descripcion")
         columna.addWidget(etiqueta)
 
+        fila.addLayout(columna, 1)
+
     def poner(self, texto: str) -> None:
         self.valor.setText(texto)
 
 
-class PantallaPanel(Pantalla):
+def _boton_icono(nombre: str, pista: str) -> QPushButton:
+    boton = QPushButton()
+    boton.setObjectName("icono")
+    boton.setIcon(iconos.icono(nombre, 15, "#cbd5e1"))
+    boton.setToolTip(pista)
+    boton.setCursor(Qt.PointingHandCursor)
+    boton.setFixedSize(32, 30)
+    return boton
+
+
+def _campo(rotulo: str, control: QWidget, ancho: int = 0) -> QWidget:
+    """Un control con su rótulo encima, como en la barra de la web."""
+    caja = QWidget()
+    caja.setObjectName("fila")
+    columna = QVBoxLayout(caja)
+    columna.setContentsMargins(0, 0, 0, 0)
+    columna.setSpacing(3)
+
+    etiqueta = QLabel(rotulo)
+    etiqueta.setObjectName("rotulo-campo")
+    columna.addWidget(etiqueta)
+    columna.addWidget(control)
+    if ancho:
+        caja.setFixedWidth(ancho)
+    return caja
+
+
+class PantallaPanel(QWidget):
     def __init__(self, motor: Motor) -> None:
-        super().__init__(
-            "Panel",
-            "Qué hay en esta memoria y cómo se relaciona. Arrastra para "
-            "mover, rueda para acercar, y pulsa una entidad para verla.",
-        )
+        super().__init__()
         self.motor = motor
+        self._apilado: Optional[bool] = None
+
+        raiz = QVBoxLayout(self)
+        raiz.setContentsMargins(32, 28, 32, 24)
+        raiz.setSpacing(14)
+
+        titulo = QLabel("Panel")
+        titulo.setObjectName("titulo")
+        raiz.addWidget(titulo)
 
         self.aviso = Aviso()
-        self.anadir(self.aviso)
-        self.anadir(self._cifras())
-        self.anadir(self._zona_grafo())
-        self.anadir(self._detalle())
-        # Sin espacio al final: aquí lo que sobra se lo queda el grafo,
-        # que es lo que se ha venido a mirar.
+        raiz.addWidget(self.aviso)
+
+        self.rejilla = QGridLayout()
+        self.rejilla.setContentsMargins(0, 0, 0, 0)
+        self.rejilla.setHorizontalSpacing(16)
+        self.rejilla.setVerticalSpacing(16)
+        raiz.addLayout(self.rejilla, 1)
+
+        self.columna_grafo = self._columna_grafo()
+        self.columna_datos = self._columna_datos()
+        self._colocar_columnas(apilado=False)
 
         self.refrescar()
 
-    # -- estructura ---------------------------------------------------------
+    # -- columnas -----------------------------------------------------------
 
-    def _cifras(self) -> QWidget:
+    def _colocar_columnas(self, apilado: bool) -> None:
+        """Pone las dos columnas al lado o una encima de otra."""
+        if self._apilado == apilado:
+            return
+        self._apilado = apilado
+
+        self.rejilla.removeWidget(self.columna_grafo)
+        self.rejilla.removeWidget(self.columna_datos)
+
+        if apilado:
+            self.rejilla.addWidget(self.columna_grafo, 0, 0)
+            self.rejilla.addWidget(self.columna_datos, 1, 0)
+            self.rejilla.setColumnStretch(0, 1)
+            self.rejilla.setColumnStretch(1, 0)
+        else:
+            self.rejilla.addWidget(self.columna_grafo, 0, 0)
+            self.rejilla.addWidget(self.columna_datos, 0, 1)
+            self.rejilla.setColumnStretch(0, PESO_GRAFO)
+            self.rejilla.setColumnStretch(1, PESO_DATOS)
+
+        self.columna_grafo.show()
+        self.columna_datos.show()
+
+    def resizeEvent(self, evento) -> None:  # noqa: N802 (nombre de Qt)
+        super().resizeEvent(evento)
+        self._colocar_columnas(self.width() < ANCHO_MINIMO_DOS_COLUMNAS)
+
+    # -- columna izquierda: el grafo ----------------------------------------
+
+    def _columna_grafo(self) -> QWidget:
         tarjeta = Tarjeta()
-        fila = QWidget()
-        fila.setObjectName("fila")
-        caja = QHBoxLayout(fila)
-        caja.setContentsMargins(0, 0, 0, 0)
-        caja.setSpacing(28)
 
-        self.cifras = {
-            "archivos": Cifra("Archivos"),
-            "tamano": Cifra("Almacenado"),
-            "documentos": Cifra("Documentos en memoria"),
-            "trozos": Cifra("Trozos"),
-            "entidades": Cifra("Entidades"),
-            "relaciones": Cifra("Relaciones"),
-        }
-        for pieza in self.cifras.values():
-            caja.addWidget(pieza)
-        caja.addStretch(1)
+        cabecera = QWidget()
+        cabecera.setObjectName("fila")
+        fila = QHBoxLayout(cabecera)
+        fila.setContentsMargins(0, 0, 0, 0)
+        fila.setSpacing(8)
 
-        tarjeta.anadir(fila)
-        return tarjeta
+        marca = QLabel()
+        marca.setPixmap(iconos.pixmap("entidades", 15, "#3b82f6"))
+        fila.addWidget(marca)
 
-    def _zona_grafo(self) -> QWidget:
-        tarjeta = Tarjeta("Grafo de conocimiento")
+        titulo = QLabel("Grafo de conocimiento")
+        titulo.setObjectName("subtitulo")
+        fila.addWidget(titulo)
+        fila.addStretch(1)
 
-        fila = QWidget()
-        fila.setObjectName("fila")
-        caja = QHBoxLayout(fila)
-        caja.setContentsMargins(0, 0, 0, 0)
-        caja.setSpacing(10)
-
-        self.resumen_grafo = QLabel("…")
+        self.resumen_grafo = QLabel("—")
         self.resumen_grafo.setObjectName("descripcion")
-        caja.addWidget(self.resumen_grafo)
-        caja.addStretch(1)
+        fila.addWidget(self.resumen_grafo)
+        tarjeta.anadir(cabecera)
 
-        caja.addWidget(QLabel("Nodos"))
-        self.tope = QComboBox()
-        for n in TOPES:
-            self.tope.addItem(str(n), n)
-        self.tope.setCurrentIndex(TOPES.index(TOPE_POR_DEFECTO))
-        self.tope.currentIndexChanged.connect(self._cargar_grafo)
-        caja.addWidget(self.tope)
-
-        encuadrar = QPushButton("Encuadrar")
-        encuadrar.setCursor(Qt.PointingHandCursor)
-        encuadrar.clicked.connect(lambda: self.grafo.encuadrar())
-        caja.addWidget(encuadrar)
-
-        actualizar = QPushButton("Actualizar")
-        actualizar.setCursor(Qt.PointingHandCursor)
-        actualizar.clicked.connect(self.refrescar)
-        caja.addWidget(actualizar)
-
-        tarjeta.anadir(fila)
+        tarjeta.anadir(self._barra())
 
         self.grafo = Grafo()
         self.grafo.elegido.connect(self._pintar_detalle)
+        self.grafo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         tarjeta.anadir(self.grafo)
+
+        self.leyenda = QWidget()
+        self.leyenda.setObjectName("fila")
+        # Envuelve: con nueve tipos y la ventana estrecha, una fila sola les
+        # recorta el nombre y deja «conce 79» en vez de «concepto 79».
+        self.caja_leyenda = Fluida(separacion=14, salto=4)
+        self.leyenda.setLayout(self.caja_leyenda)
+        tarjeta.anadir(self.leyenda)
+
+        ayuda = QLabel(
+            "Arrastra para mover el lienzo, rueda para acercar, y pulsa una "
+            "entidad para ver su ficha y aislar sus relaciones."
+        )
+        ayuda.setObjectName("descripcion")
+        ayuda.setWordWrap(True)
+        tarjeta.anadir(ayuda)
         return tarjeta
 
-    def _detalle(self) -> QWidget:
+    def _barra(self) -> QWidget:
+        barra = QWidget()
+        barra.setObjectName("fila")
+        fila = QHBoxLayout(barra)
+        fila.setContentsMargins(0, 2, 0, 2)
+        fila.setSpacing(10)
+
+        self.entidad = QComboBox()
+        self.entidad.addItem("Todo el grafo", "*")
+        self.entidad.currentIndexChanged.connect(self._cargar_grafo)
+        fila.addWidget(_campo("Entidad de partida", self.entidad), 2)
+
+        self.profundidad = QComboBox()
+        for valor, rotulo in PROFUNDIDADES:
+            self.profundidad.addItem(rotulo, valor)
+        self.profundidad.setCurrentIndex(2)
+        self.profundidad.currentIndexChanged.connect(self._cargar_grafo)
+        fila.addWidget(_campo("Profundidad", self.profundidad, 112))
+
+        self.tope = QComboBox()
+        for valor in TOPES:
+            self.tope.addItem(str(valor), valor)
+        self.tope.setCurrentIndex(TOPES.index(TOPE_POR_DEFECTO))
+        self.tope.currentIndexChanged.connect(self._cargar_grafo)
+        fila.addWidget(_campo("Nodos máx.", self.tope, 96))
+
+        self.disposicion = QComboBox()
+        for clave, rotulo, _clase in DISPOSICIONES:
+            self.disposicion.addItem(rotulo, clave)
+        self.disposicion.currentIndexChanged.connect(
+            lambda: self.grafo.disponer(self.disposicion.currentData())
+        )
+        fila.addWidget(_campo("Disposición", self.disposicion, 168))
+
+        self.busqueda = QLineEdit()
+        self.busqueda.setPlaceholderText("Resaltar por nombre…")
+        self.busqueda.textChanged.connect(self._buscar)
+        self.campo_busqueda = _campo("Buscar entidad", self.busqueda)
+        fila.addWidget(self.campo_busqueda, 2)
+
+        acciones = QWidget()
+        acciones.setObjectName("fila")
+        caja = QHBoxLayout(acciones)
+        caja.setContentsMargins(0, 0, 0, 0)
+        caja.setSpacing(4)
+        for nombre, pista, accion in (
+            ("alejar", "Alejar", lambda: self.grafo.alejar()),
+            ("acercar", "Acercar", lambda: self.grafo.acercar()),
+            ("encajar", "Encajar el grafo", lambda: self.grafo.encuadrar()),
+            ("recargar", "Volver a leer el grafo", self.refrescar),
+        ):
+            boton = _boton_icono(nombre, pista)
+            boton.clicked.connect(accion)
+            caja.addWidget(boton)
+        fila.addWidget(_campo(" ", acciones))
+        return barra
+
+    # -- columna derecha: los datos -----------------------------------------
+
+    def _columna_datos(self) -> QWidget:
+        envoltorio = QScrollArea()
+        envoltorio.setWidgetResizable(True)
+        envoltorio.setFrameShape(QFrame.NoFrame)
+        envoltorio.setObjectName("conversacion")
+        envoltorio.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        dentro = QWidget()
+        dentro.setObjectName("fila")
+        columna = QVBoxLayout(dentro)
+        columna.setContentsMargins(0, 0, 8, 0)
+        columna.setSpacing(16)
+
+        tarjeta = Tarjeta("Esta memoria")
+        self.cifras: dict[str, Cifra] = {}
+        for clave, icono_nombre, rotulo in CIFRAS:
+            pieza = Cifra(icono_nombre, rotulo)
+            self.cifras[clave] = pieza
+            tarjeta.anadir(pieza)
+        columna.addWidget(tarjeta)
+
         self.tarjeta_detalle = Tarjeta("Entidad")
         self.detalle_nombre = self.tarjeta_detalle.dato("Nombre", "—")
         self.detalle_tipo = self.tarjeta_detalle.dato("Tipo", "—")
         self.detalle_grado = self.tarjeta_detalle.dato("Relaciones", "—")
-        self.detalle_origen = self.tarjeta_detalle.dato("De qué documento", "—")
+        self.detalle_origen = self.tarjeta_detalle.dato("Documento", "—")
         self.detalle_texto = self.tarjeta_detalle.dato("Descripción", "—")
-        # Empieza escondida: una tarjeta con cinco guiones no informa de nada
-        # y quita sitio al grafo, que es lo que se ha venido a ver.
+        # Escondida hasta que se pulse algo: cinco guiones no informan de nada.
         self.tarjeta_detalle.hide()
-        return self.tarjeta_detalle
+        columna.addWidget(self.tarjeta_detalle)
+
+        columna.addStretch(1)
+        envoltorio.setWidget(dentro)
+        return envoltorio
 
     # -- datos --------------------------------------------------------------
 
@@ -195,10 +378,16 @@ class PantallaPanel(Pantalla):
         self.cifras["relaciones"].poner(_numero(datos.get("relations")))
 
     def _cargar_grafo(self) -> None:
+        etiqueta = self.entidad.currentData() or "*"
+        salto = self.profundidad.currentData() or 3
         tope = self.tope.currentData() or TOPE_POR_DEFECTO
-        self.resumen_grafo.setText("Cargando el grafo…")
+        self.resumen_grafo.setText("Cargando…")
+
+        from urllib.parse import quote
+
         self.motor.get(
-            f"/bimnemo/graph?label=*&max_depth=3&max_nodes={tope}",
+            f"/bimnemo/graph?label={quote(str(etiqueta))}"
+            f"&max_depth={salto}&max_nodes={tope}",
             self._pintar_grafo,
             self._fallo,
         )
@@ -209,14 +398,78 @@ class PantallaPanel(Pantalla):
         nodos = datos.get("nodes") or []
         aristas = datos.get("edges") or []
         self.grafo.poner(nodos, aristas)
+        self.grafo.disponer(self.disposicion.currentData())
         self.grafo.encuadrar()
 
-        texto = f"{len(nodos)} entidades y {len(aristas)} relaciones a la vista"
+        texto = f"{len(nodos)} entidades · {len(aristas)} relaciones"
         if datos.get("truncated"):
             # Decirlo importa: sin esto, quien mira cree que su memoria
             # entera es lo que ve, y no lo es.
             texto += " · hay más de las que caben"
         self.resumen_grafo.setText(texto)
+
+        self._pintar_leyenda()
+        self._llenar_entidades(nodos)
+
+    def _pintar_leyenda(self) -> None:
+        """Un punto de color, el tipo y cuántos hay, como en la web."""
+        while self.caja_leyenda.count():
+            viejo = self.caja_leyenda.takeAt(0)
+            if viejo.widget():
+                viejo.widget().deleteLater()
+
+        for tipo, cuantos, color in self.grafo.tipos():
+            pieza = QWidget()
+            pieza.setObjectName("fila")
+            caja = QHBoxLayout(pieza)
+            caja.setContentsMargins(0, 0, 0, 0)
+            caja.setSpacing(5)
+
+            punto = QLabel("●")
+            punto.setStyleSheet(f"color: {color.name()}; font-size: 13px;")
+            caja.addWidget(punto)
+
+            nombre = QLabel(tipo)
+            nombre.setObjectName("dato-valor")
+            caja.addWidget(nombre)
+
+            cuenta = QLabel(str(cuantos))
+            cuenta.setObjectName("descripcion")
+            caja.addWidget(cuenta)
+
+            self.caja_leyenda.addWidget(pieza)
+
+    def _llenar_entidades(self, nodos: list[dict]) -> None:
+        """El selector de entidad de partida, con las más conectadas primero.
+
+        Solo se rellena cuando se está viendo el grafo entero: si ya se ha
+        filtrado por una entidad, la lista que llega es la de su vecindario y
+        reescribir el selector con ella perdería el resto del grafo.
+        """
+        if self.entidad.currentData() != "*" or self.entidad.count() > 1:
+            return
+        mejores = sorted(
+            nodos, key=lambda n: -int(n.get("degree") or 0)
+        )[:120]
+        self.entidad.blockSignals(True)
+        for n in mejores:
+            nombre = str(n.get("label") or n.get("id") or "")
+            if nombre:
+                self.entidad.addItem(nombre, nombre)
+        self.entidad.blockSignals(False)
+
+    def _buscar(self, texto: str) -> None:
+        cuantas = self.grafo.resaltar(texto)
+        etiqueta = self.campo_busqueda.findChild(QLabel)
+        if etiqueta is None:
+            return
+        if not texto.strip():
+            etiqueta.setText("Buscar entidad")
+        else:
+            etiqueta.setText(
+                f"Buscar entidad · {cuantas} encontrada"
+                + ("s" if cuantas != 1 else "")
+            )
 
     def _pintar_detalle(self, nodo: Optional[dict]) -> None:
         if not nodo:

@@ -24,19 +24,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lightrag.api.bimnemo.nativo import tema
+from lightrag.api.bimnemo.nativo import iconos, tema
 from lightrag.api.bimnemo.nativo.motor import Motor
 
 #: Las pantallas, en el orden en que salen. El segundo valor es la etapa del
 #: plan en que se construye cada una; mientras no llegue, sale un hueco que
 #: dice qué falta en vez de una pantalla en blanco que parece rota.
 PANTALLAS = (
-    ("Panel", 4),
-    ("Archivos", 3),
-    ("Chat", 5),
-    ("Configuración IA", 2),
-    ("Motor", 2),
-    ("API", 6),
+    ("Panel", "panel"),
+    ("Archivos", "archivos"),
+    ("Chat", "chat"),
+    ("Configuración IA", "configuracion"),
+    ("Motor", "motor"),
+    ("API", "api"),
 )
 
 
@@ -87,11 +87,13 @@ def _punto(par: tuple[float, float]):
 class Hueco(QWidget):
     """Lo que se ve donde todavía no hay pantalla.
 
-    Dice **qué falta y cuándo llega**. Una pantalla vacía sin explicación se
-    interpreta siempre como un programa roto.
+    Ya no queda ninguna, pero se conserva: una pantalla vacía sin explicación
+    se interpreta siempre como un programa roto, y si mañana se añade una
+    entrada de navegación antes que su pantalla, esto es lo que evita que el
+    usuario crea que algo se ha estropeado.
     """
 
-    def __init__(self, nombre: str, etapa: int) -> None:
+    def __init__(self, nombre: str) -> None:
         super().__init__()
         caja = QVBoxLayout(self)
         caja.setContentsMargins(32, 28, 32, 28)
@@ -102,7 +104,7 @@ class Hueco(QWidget):
         caja.addWidget(titulo)
 
         aviso = QLabel(
-            f"Esta pantalla llega en la etapa {etapa} de la interfaz nativa.\n"
+            "Esta pantalla todavía no está en la ventana nativa.\n"
             "Mientras tanto está disponible en la interfaz web, que sigue "
             "funcionando igual."
         )
@@ -142,8 +144,8 @@ class Ventana(QMainWindow):
 
         self.setCentralWidget(raiz)
 
-        for nombre, etapa in PANTALLAS:
-            self.registrar_pantalla(nombre, Hueco(nombre, etapa))
+        for nombre, _icono in PANTALLAS:
+            self.registrar_pantalla(nombre, Hueco(nombre))
         self._pantallas_construidas()
         self._botones[0].setChecked(True)
 
@@ -186,7 +188,7 @@ class Ventana(QMainWindow):
         marca = QLabel()
         marca.setObjectName("marca")
         marca.setFixedSize(28, 28)
-        marca.setPixmap(_marca(28, self.paleta.azul))
+        marca.setPixmap(_marca(28, self.paleta.azul))  # cuadrado azul de marca
         marca.setAlignment(Qt.AlignCenter)
         fila.addWidget(marca)
 
@@ -226,9 +228,10 @@ class Ventana(QMainWindow):
         self._grupo.setExclusive(True)
         self._botones: list[QPushButton] = []
 
-        for indice, (nombre, _etapa) in enumerate(PANTALLAS):
+        for indice, (nombre, icono_nombre) in enumerate(PANTALLAS):
             boton = QPushButton(nombre)
             boton.setObjectName("nav")
+            boton.setIcon(iconos.icono(icono_nombre, 15, "#94a3b8"))
             boton.setCheckable(True)
             boton.setCursor(Qt.PointingHandCursor)
             boton.clicked.connect(
@@ -256,7 +259,7 @@ class Ventana(QMainWindow):
         Al llegar cada etapa se sustituye el `Hueco` por la pantalla de
         verdad **aquí y en ningún otro sitio**.
         """
-        indice = [n for n, _e in PANTALLAS].index(nombre)
+        indice = [n for n, _i in PANTALLAS].index(nombre)
         anterior = self.contenido.widget(indice)
         if anterior is not None:
             self.contenido.removeWidget(anterior)
