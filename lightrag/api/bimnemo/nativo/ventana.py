@@ -159,7 +159,9 @@ class Ventana(QMainWindow):
             PantallaConfiguracion,
         )
         from lightrag.api.bimnemo.nativo.pantalla_motor import PantallaMotor
+        from lightrag.api.bimnemo.nativo.pantalla_panel import PantallaPanel
 
+        self.registrar_pantalla("Panel", PantallaPanel(self.motor))
         self.registrar_pantalla("Archivos", PantallaArchivos(self.motor))
         self.registrar_pantalla("Motor", PantallaMotor(self.motor))
         self.registrar_pantalla(

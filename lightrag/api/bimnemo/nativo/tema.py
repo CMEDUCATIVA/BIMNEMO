@@ -174,6 +174,11 @@ def hoja(p: Paleta) -> str:
         font-size: 15px;
         font-weight: 600;
     }}
+    #cifra {{
+        color: {p.texto};
+        font-size: 26px;
+        font-weight: 600;
+    }}
     #dato-nombre {{ color: {p.texto_3}; }}
     #dato-valor  {{ color: {p.texto}; }}
     /* Las filas son cajas para colocar, no superficies. Sin esto pintan el
