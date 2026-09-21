@@ -25,13 +25,13 @@ meses no se recordará:
 
 ## Lo que NO se toca
 
-**La interfaz web se queda.** No se borra, no se aparca: se sigue sirviendo en
-`/bimnemo-app/`. Dos motivos, y ninguno es sentimental:
+> **Actualización (1.4):** la interfaz web se retiró cuando la ventana nativa
+> tuvo sus seis pantallas y pasó a ser la de por defecto. Lo que sigue en este
+> apartado es el plan tal como se escribió.
 
-1. Es el modo `--navegador`, que hoy funciona y es el plan B si la ventana
-   nativa falla en el ordenador de alguien.
-2. Es lo que ve cualquiera que entre por el puerto, que es media promesa del
-   producto: *«conecta cualquier IA a esta memoria»*.
+**La interfaz web se queda** mientras se construye la nativa: se sigue
+sirviendo en `/bimnemo-app/` y es el modo `--navegador`, el plan B si la
+ventana nativa falla en el ordenador de alguien.
 
 **La API tampoco.** Es la superficie de integración y la parte que un cliente
 puede automatizar. La interfaz nativa es **otro cliente más** de esa API.
@@ -86,10 +86,10 @@ Cada una termina con la aplicación **arrancando y verificada**, no a medias.
 | 5 | **Chat** | Conversación y envío |
 | 6 | **API** | Lista de endpoints, agrupada, con copiar |
 
-Hasta terminar la etapa 6, la ventana nativa se pide con `--nativo` y la de
-navegador sigue siendo la de por defecto. Cambiar el valor por defecto es lo
-último que se hace, no lo primero: así nunca hay una versión publicada en la
-que el usuario se quede sin pantallas.
+Hasta terminar la etapa 6, la ventana nativa se pedía con `--nativo` y la de
+navegador era la de por defecto. Cambiar el valor por defecto fue lo último,
+no lo primero: así nunca hubo una versión publicada en la que el usuario se
+quedara sin pantallas. Hecho en la 1.4; `--nativo` se sigue aceptando.
 
 ---
 
@@ -119,8 +119,8 @@ negro en el sitio menos oportuno.
 
 ## El tema
 
-Los colores **no se inventan**: salen de `ui/css/tokens.css`, para que la
-ventana nativa y la web sean el mismo producto.
+Los colores **no se inventaron**: salieron de `ui/css/tokens.css` de la web.
+Retirada la web, la tabla vive en `nativo/tema.py` y es la única fuente.
 
 | | Claro | Oscuro |
 |---|---|---|

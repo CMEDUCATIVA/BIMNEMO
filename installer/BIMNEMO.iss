@@ -111,6 +111,14 @@ Source: "salida\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cr
 ; allí el `.venv` sí es el bueno y no se toca.
 Type: filesandordirs; Name: "{app}\.venv"; Check: not EsCopiaDeDesarrollo
 
+; Los perfiles de Chromium de las versiones hasta la 1.3, cuando la ventana
+; era un Chrome. Desde la 1.4 es nativa y nadie vuelve a abrirlos: son 35 MB
+; de caché de navegador que se quedarían para siempre. El segundo nombre es
+; el de las primeras versiones, antes de mover el perfil fuera del repositorio.
+Type: filesandordirs; Name: "{localappdata}\BIMNEMO\chromium-profile"
+Type: filesandordirs; Name: "{app}\chromium-profile"
+Type: filesandordirs; Name: "{app}\perfil-chrome"
+
 [Icons]
 ; Sin `IconFilename`: el icono ya va **dentro** de `bimnemo.exe`, sellado al
 ; empaquetar. Referenciar un `.ico` suelto además sería tener el mismo icono

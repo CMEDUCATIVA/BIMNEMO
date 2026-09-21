@@ -12,7 +12,7 @@ mismo criterio. Hay dos clases de disposición y se comportan distinto:
 from __future__ import annotations
 
 import math
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 

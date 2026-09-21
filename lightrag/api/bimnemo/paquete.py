@@ -40,7 +40,6 @@ mitad deja el disco del cliente exactamente como estaba.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import tempfile
 import urllib.error
