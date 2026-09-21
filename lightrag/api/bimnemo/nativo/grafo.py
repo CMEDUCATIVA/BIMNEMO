@@ -80,6 +80,14 @@ COLORES = (
     "#64748b",  # slate
 )
 
+#: El color del resaltado de la búsqueda.
+#:
+#: Ámbar a propósito, y no el azul de marca: el azul es el color del tipo de
+#: entidad más común, así que un acierto azul sobre un nodo azul no se
+#: distinguía de sus vecinos. El ámbar no lo usa ningún tipo hasta el séptimo
+#: y es el que más salta sobre un fondo oscuro.
+AMBAR = "#fbbf24"
+
 #: 16 ms ≈ 60 fotogramas por segundo.
 PASO_MS = 16
 
@@ -492,14 +500,14 @@ class Grafo(QWidget):
             pintor.setBrush(color)
 
             if casa:
-                # Halo claro alrededor del acierto, y el nodo más grande.
-                halo = QColor(tema.ACTUAL.texto)
-                halo.setAlpha(70)
+                # Halo ámbar alrededor del acierto, y anillo del mismo color.
+                halo = QColor(AMBAR)
+                halo.setAlpha(90)
                 pintor.setPen(Qt.NoPen)
                 pintor.setBrush(halo)
                 pintor.drawEllipse(centro, radio + 7, radio + 7)
                 pintor.setBrush(color)
-                pintor.setPen(QPen(QColor(tema.ACTUAL.texto), 2.0))
+                pintor.setPen(QPen(QColor(AMBAR), 2.2))
             elif i == self._elegido:
                 pintor.setPen(QPen(QColor(tema.ACTUAL.texto), 2.0))
             elif i == self._encima:
@@ -523,7 +531,14 @@ class Grafo(QWidget):
 
             centro = self._a_pantalla(self._pos[i])
             radio = self._radio[i] * k
-            caja = QRectF(centro.x() - 80, centro.y() + radio + 2, 160, 14)
+
+            # El ancho del rótulo **crece con el zoom**. Con 160 píxeles
+            # fijos pasaba lo contrario de lo que uno espera: al acercar, la
+            # letra se hacía más grande, cabían menos caracteres en la misma
+            # caja y los nombres salían más cortados que de lejos.
+            ancho = max(110.0, min(420.0, 190.0 * k))
+            alto = pintor.fontMetrics().height() + 2
+            caja = QRectF(centro.x() - ancho / 2, centro.y() + radio + 2, ancho, alto)
             texto = pintor.fontMetrics().elidedText(
                 str(nodo.get("label") or nodo.get("id") or ""),
                 Qt.ElideRight,
@@ -533,14 +548,20 @@ class Grafo(QWidget):
             if i in self._resaltados:
                 # Fondo detrás del nombre del acierto: sobre una maraña de
                 # aristas, el texto claro solo no se lee.
-                ancho = pintor.fontMetrics().horizontalAdvance(texto) + 8
-                fondo = QRectF(centro.x() - ancho / 2, caja.top() - 1, ancho, 15)
+                ancho_chip = pintor.fontMetrics().horizontalAdvance(texto) + 10
+                fondo = QRectF(
+                    centro.x() - ancho_chip / 2,
+                    caja.top() - 1,
+                    ancho_chip,
+                    caja.height() + 2,
+                )
                 pintor.setPen(Qt.NoPen)
-                telon = QColor(tema.ACTUAL.fondo)
-                telon.setAlpha(210)
-                pintor.setBrush(telon)
+                # Pastilla ámbar con el texto del color del fondo: se lee
+                # igual de bien en tema claro y en oscuro, y no hay que
+                # elegir un color de texto por tema.
+                pintor.setBrush(QColor(AMBAR))
                 pintor.drawRoundedRect(fondo, 3, 3)
-                pintor.setPen(QColor(tema.ACTUAL.azul))
+                pintor.setPen(QColor(tema.ACTUAL.fondo))
             else:
                 pintor.setPen(QColor(tema.ACTUAL.texto_2))
 
