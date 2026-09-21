@@ -28,8 +28,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtCore import QByteArray, QPointF, Qt
+from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 CARPETA = Path(__file__).resolve().parent / "iconos"
@@ -59,6 +59,10 @@ NOMBRES = {
     "recargar": "arrow-clockwise",
     "buscar": "search",
     "borrar": "trash3",
+    "editar": "pencil",
+    "claro": "brightness-high",
+    "oscuro": "moon",
+    "aviso": "exclamation-triangle",
     "subir": "cloud-arrow-up",
     "copiar": "clipboard",
     # Marca
@@ -102,4 +106,48 @@ def icono(nombre: str, lado: int = 16, color: str = "#cbd5e1") -> QIcon:
     return QIcon(pixmap(nombre, lado, color))
 
 
-__all__ = ["NOMBRES", "icono", "pixmap"]
+def marca(lado: int) -> QPixmap:
+    """El cuadrado azul de la marca, dibujado con el mismo glifo que la web.
+
+    Se dibuja en vez de cargar una imagen para que siga el tamaño de la
+    pantalla: en un monitor de alta densidad un `.png` de 28 píxeles se ve
+    borroso y este no.
+    """
+    lienzo = QPixmap(lado, lado)
+    lienzo.fill(Qt.transparent)
+
+    pintor = QPainter(lienzo)
+    pintor.setRenderHint(QPainter.Antialiasing)
+    pintor.setBrush(Qt.NoBrush)
+
+    grosor = max(1.0, lado / 12.0)
+    pluma = QPen(Qt.white, grosor)
+    pluma.setCapStyle(Qt.RoundCap)
+    pluma.setJoinStyle(Qt.RoundJoin)
+    pintor.setPen(pluma)
+
+    # Rejilla de 24, la del `viewBox` del icono `network` de `icons.js`.
+    escala = lado / 24.0 * 0.66
+    margen = (lado - 24 * escala) / 2.0
+
+    def p(x: float, y: float) -> tuple[float, float]:
+        return (margen + x * escala, margen + y * escala)
+
+    for x, y in ((16, 16), (2, 16), (9, 2)):
+        ex, ey = p(x, y)
+        pintor.drawRoundedRect(ex, ey, 6 * escala, 6 * escala, escala, escala)
+
+    pintor.drawPolyline([_punto(p(5, 16)), _punto(p(5, 12)),
+                         _punto(p(19, 12)), _punto(p(19, 16))])
+    pintor.drawLine(*p(12, 12), *p(12, 8))
+    pintor.end()
+    return lienzo
+
+
+def _punto(par: tuple[float, float]):
+    from PySide6.QtCore import QPointF
+
+    return QPointF(par[0], par[1])
+
+
+__all__ = ["NOMBRES", "icono", "marca", "pixmap"]

@@ -412,11 +412,11 @@ class PantallaPanel(QWidget):
         return tarjeta
 
     def _pie(self) -> QWidget:
-        """Leyenda y ayuda, con su propio fondo.
+        """Leyenda y ayuda, en el hueco de abajo de la caja del grafo.
 
-        Sueltas sobre la tarjeta parecían flotar encima del lienzo. Puestas
-        en su propia banda, con fondo y un borde arriba, se leen como lo que
-        son: el pie del grafo, no parte del dibujo.
+        Sin fondo, sin línea y sin banda: nada encima de nada. El lienzo
+        ocupa menos alto y en el espacio que deja, dentro de la misma caja,
+        van la leyenda y la ayuda, centradas.
         """
         pie = QFrame()
         pie.setObjectName("pie-grafo")
@@ -428,7 +428,7 @@ class PantallaPanel(QWidget):
         self.leyenda.setObjectName("fila")
         # Envuelve: con nueve tipos y la ventana estrecha, una fila sola les
         # recorta el nombre y deja «conce 79» en vez de «concepto 79».
-        self.caja_leyenda = Fluida(separacion=14, salto=4)
+        self.caja_leyenda = Fluida(separacion=14, salto=4, centrado=True)
         self.leyenda.setLayout(self.caja_leyenda)
         columna.addWidget(self.leyenda)
 
@@ -438,6 +438,7 @@ class PantallaPanel(QWidget):
         )
         ayuda.setObjectName("descripcion")
         ayuda.setWordWrap(True)
+        ayuda.setAlignment(Qt.AlignHCenter)
         columna.addWidget(ayuda)
         return pie
 

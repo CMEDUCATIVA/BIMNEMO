@@ -71,6 +71,34 @@ class Tarjeta(QFrame):
         return derecha
 
 
+def insignia(texto: str, color: str, fondo: str, punto: bool = False) -> QLabel:
+    """Una etiqueta de color: categoría, estado del motor, lo que sea.
+
+    El estilo va en el propio widget y no en la hoja general porque el color
+    cambia en cada uso; una regla por cada categoría y cada estado serían
+    veinte reglas para decir lo mismo.
+    """
+    etiqueta = QLabel()
+    etiqueta.setObjectName("insignia")
+    pintar_insignia(etiqueta, texto, color, fondo, punto)
+    return etiqueta
+
+
+def pintar_insignia(
+    etiqueta: QLabel, texto: str, color: str, fondo: str, punto: bool = False
+) -> None:
+    """Vuelve a pintar una insignia que ya existe, con otro color y otro texto.
+
+    Lo necesita lo que cambia sin rehacerse —el estado del motor, arriba a la
+    derecha— y es el mismo estilo que `insignia`, escrito una sola vez.
+    """
+    etiqueta.setText(f"●  {texto}" if punto else texto)
+    etiqueta.setStyleSheet(
+        f"background: {fondo}; border-radius: 9px; color: {color};"
+        " font-size: 11px; font-weight: 600; padding: 2px 9px;"
+    )
+
+
 class Aviso(QLabel):
     """Una línea de estado que se puede pintar de tres maneras.
 
@@ -118,11 +146,14 @@ class Fluida(QLayout):
     castellano y sin las opciones que aquí no se usan.
     """
 
-    def __init__(self, separacion: int = 12, salto: int = 6) -> None:
+    def __init__(
+        self, separacion: int = 12, salto: int = 6, centrado: bool = False
+    ) -> None:
         super().__init__()
         self._piezas: list = []
         self._separacion = separacion
         self._salto = salto
+        self._centrado = centrado
         self.setContentsMargins(0, 0, 0, 0)
 
     # -- lo que `QLayout` exige --------------------------------------------
@@ -163,22 +194,48 @@ class Fluida(QLayout):
             medida = medida.expandedTo(pieza.minimumSize())
         return medida
 
-    def _repartir(self, rect, medir: bool) -> int:
-        x, y, alto_fila = rect.x(), rect.y(), 0
+    def _filas(self, rect) -> list[tuple[list, int, int]]:
+        """Reparte las piezas en filas: cuáles van juntas, y cuánto miden.
+
+        Se calculan **antes** de colocar nada porque para centrar una fila
+        hay que saber su ancho total, y eso no se sabe hasta haberla
+        cerrado.
+        """
+        filas: list[tuple[list, int, int]] = []
+        actual: list = []
+        ancho_fila = 0
+        alto_fila = 0
 
         for pieza in self._piezas:
-            ancho = pieza.sizeHint().width()
-            alto = pieza.sizeHint().height()
-            if x + ancho > rect.right() and alto_fila > 0:
-                x = rect.x()
-                y += alto_fila + self._salto
-                alto_fila = 0
-            if not medir:
-                pieza.setGeometry(QRect(QPoint(x, y), pieza.sizeHint()))
-            x += ancho + self._separacion
-            alto_fila = max(alto_fila, alto)
+            medida = pieza.sizeHint()
+            siguiente = ancho_fila + medida.width() + (
+                self._separacion if actual else 0
+            )
+            if actual and siguiente > rect.width():
+                filas.append((actual, ancho_fila, alto_fila))
+                actual, ancho_fila, alto_fila = [], 0, 0
+                siguiente = medida.width()
+            actual.append(pieza)
+            ancho_fila = siguiente
+            alto_fila = max(alto_fila, medida.height())
 
-        return y + alto_fila - rect.y()
+        if actual:
+            filas.append((actual, ancho_fila, alto_fila))
+        return filas
+
+    def _repartir(self, rect, medir: bool) -> int:
+        y = rect.y()
+        for piezas, ancho_fila, alto_fila in self._filas(rect):
+            x = rect.x()
+            if self._centrado:
+                x += max(0, (rect.width() - ancho_fila) // 2)
+            for pieza in piezas:
+                if not medir:
+                    pieza.setGeometry(QRect(QPoint(x, y), pieza.sizeHint()))
+                x += pieza.sizeHint().width() + self._separacion
+            y += alto_fila + self._salto
+
+        return max(0, y - self._salto - rect.y())
 
 
 class Pantalla(QWidget):

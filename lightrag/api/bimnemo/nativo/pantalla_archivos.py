@@ -51,10 +51,9 @@ from lightrag.api.bimnemo.nativo.archivos_piezas import (
     ZonaSoltar,
     categoria_de,
     icono_categoria,
-    insignia,
 )
 from lightrag.api.bimnemo.nativo.motor import Motor
-from lightrag.api.bimnemo.nativo.piezas import Aviso, Pantalla, Tarjeta
+from lightrag.api.bimnemo.nativo.piezas import Aviso, Pantalla, Tarjeta, insignia
 
 #: Las columnas, en el orden de la web.
 COLUMNAS = (

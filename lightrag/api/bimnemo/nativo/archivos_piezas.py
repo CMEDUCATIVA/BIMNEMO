@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from lightrag.api.bimnemo.nativo import iconos, tema
-from lightrag.api.bimnemo.nativo.piezas import Fluida
+from lightrag.api.bimnemo.nativo.piezas import Fluida, insignia  # noqa: F401
 
 #: La categoría de descarte, la misma que `catalog.UNKNOWN`. No viene en el
 #: catálogo —no ocupa una de las ocho ranuras— pero sí aparece en las filas.
@@ -61,22 +61,6 @@ def icono_categoria(color: str) -> QIcon:
     pintor.drawRoundedRect(2, 2, 12, 12, 3, 3)
     pintor.end()
     return QIcon(lienzo)
-
-
-def insignia(texto: str, color: str, fondo: str, punto: bool = False) -> QLabel:
-    """Una etiqueta de color: categoría o estado.
-
-    El estilo va en el propio widget y no en la hoja general porque el color
-    cambia en cada fila; una regla por cada categoría y cada estado serían
-    veinte reglas para decir lo mismo.
-    """
-    etiqueta = QLabel(f"●  {texto}" if punto else texto)
-    etiqueta.setObjectName("insignia")
-    etiqueta.setStyleSheet(
-        f"background: {fondo}; border-radius: 9px; color: {color};"
-        " font-size: 11px; font-weight: 600; padding: 2px 9px;"
-    )
-    return etiqueta
 
 
 class ZonaSoltar(QFrame):

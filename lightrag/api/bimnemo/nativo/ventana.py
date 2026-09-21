@@ -8,7 +8,7 @@ tema; las pantallas llegan en las etapas siguientes y se enchufan en
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -36,50 +36,6 @@ PANTALLAS = (
     ("Motor", "motor"),
     ("API", "api"),
 )
-
-
-def _marca(lado: int, color: str) -> QPixmap:
-    """El cuadrado azul de la marca, dibujado con el mismo glifo que la web.
-
-    Se dibuja en vez de cargar una imagen para que siga el tamaño de la
-    pantalla: en un monitor de alta densidad un `.png` de 28 píxeles se ve
-    borroso y este no.
-    """
-    lienzo = QPixmap(lado, lado)
-    lienzo.fill(Qt.transparent)
-
-    pintor = QPainter(lienzo)
-    pintor.setRenderHint(QPainter.Antialiasing)
-    pintor.setBrush(Qt.NoBrush)
-
-    grosor = max(1.0, lado / 12.0)
-    pluma = QPen(Qt.white, grosor)
-    pluma.setCapStyle(Qt.RoundCap)
-    pluma.setJoinStyle(Qt.RoundJoin)
-    pintor.setPen(pluma)
-
-    # Rejilla de 24, la del `viewBox` del icono `network` de `icons.js`.
-    escala = lado / 24.0 * 0.66
-    margen = (lado - 24 * escala) / 2.0
-
-    def p(x: float, y: float) -> tuple[float, float]:
-        return (margen + x * escala, margen + y * escala)
-
-    for x, y in ((16, 16), (2, 16), (9, 2)):
-        ex, ey = p(x, y)
-        pintor.drawRoundedRect(ex, ey, 6 * escala, 6 * escala, escala, escala)
-
-    pintor.drawPolyline([_punto(p(5, 16)), _punto(p(5, 12)),
-                         _punto(p(19, 12)), _punto(p(19, 16))])
-    pintor.drawLine(*p(12, 12), *p(12, 8))
-    pintor.end()
-    return lienzo
-
-
-def _punto(par: tuple[float, float]):
-    from PySide6.QtCore import QPointF
-
-    return QPointF(par[0], par[1])
 
 
 class Hueco(QWidget):
@@ -123,7 +79,7 @@ class Ventana(QMainWindow):
         tema.usar(self.paleta)
 
         self.setWindowTitle("BIMNEMO — Memoria de conocimiento")
-        self.setWindowIcon(QIcon(_marca(64, self.paleta.azul)))
+        self.setWindowIcon(QIcon(iconos.marca(64)))
         self.resize(1280, 820)
         self.setMinimumSize(980, 620)
         self.setStyleSheet(tema.hoja(self.paleta))

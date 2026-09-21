@@ -405,7 +405,6 @@ def hoja(p: Paleta) -> str:
     #pie-grafo {{
         background: transparent;
         border: none;
-        border-top: 1px solid {p.borde_medio};
     }}
 
     /* --- API ------------------------------------------------------------ */
