@@ -25,10 +25,11 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QProgressBar, QPushButton, QWidget
 
 from lightrag.api.bimnemo.nativo import iconos
@@ -40,9 +41,15 @@ from lightrag.api.bimnemo.nativo.reinicio import Reinicio, conectar_barra
 #: es cuando la ventana tiene más cosas que pedir al motor.
 PRIMERA_MS = 5_000
 
-#: Y después, cada media hora. Una versión nueva no corre prisa, y GitHub
-#: limita las consultas sin credencial a 60 por hora.
-INTERVALO_MS = 30 * 60 * 1_000
+#: Y después, cada cinco minutos. Con media hora, una versión publicada justo
+#: después de abrir tardaba en verse lo bastante como para parecer que el
+#: aviso no funcionaba. No cuesta nada: el motor guarda la respuesta de GitHub
+#: cinco minutos, así que GitHub no recibe más de doce consultas por hora.
+INTERVALO_MS = 5 * 60 * 1_000
+
+#: Al volver a la ventana también se pregunta, pero no más de una vez por
+#: minuto: cambiar de ventana veinte veces seguidas no son veinte consultas.
+MINIMO_ENTRE_CONSULTAS = 60.0
 
 #: El ritmo del parpadeo del botón.
 PARPADEO_MS = 650
@@ -90,15 +97,30 @@ class Vigia(QObject):
         super().__init__(parent)
         self.motor = motor
         self.estado: dict[str, Any] = {}
+        self._ultima = 0.0
         self._reloj = QTimer(self)
         self._reloj.setInterval(INTERVALO_MS)
         self._reloj.timeout.connect(self.mirar)
+        # Quien vuelve a BIMNEMO es quien puede pulsar el botón: es el momento
+        # de mirar si hay algo nuevo.
+        if parent is not None:
+            parent.installEventFilter(self)
+
+    def eventFilter(self, objeto, evento) -> bool:  # noqa: N802 (nombre de Qt)
+        if evento.type() == QEvent.WindowActivate:
+            self.mirar_si_toca()
+        return False
+
+    def mirar_si_toca(self) -> None:
+        if time.monotonic() - self._ultima >= MINIMO_ENTRE_CONSULTAS:
+            self.mirar()
 
     def arrancar(self) -> None:
         QTimer.singleShot(PRIMERA_MS, self.mirar)
         self._reloj.start()
 
     def mirar(self) -> None:
+        self._ultima = time.monotonic()
         # Sin red, GitHub no contesta y el motor lo dice sin error: no hay
         # nada que avisar, que es exactamente lo que se hace.
         self.motor.get("/bimnemo/update", self._llego, lambda _motivo: None)

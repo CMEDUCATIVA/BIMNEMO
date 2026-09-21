@@ -46,6 +46,8 @@ CACHE_SEGUNDOS = 300
 TIMEOUT = 6.0
 
 _cache: dict[str, Any] = {"momento": 0.0, "dato": None}
+#: La última versión publicada, para las instalaciones sin git.
+_cache_release: dict[str, Any] = {"momento": 0.0, "dato": None}
 
 
 def raiz() -> Path:
@@ -164,7 +166,16 @@ def _estado_release(forzar: bool = False) -> dict[str, Any]:
             ),
         }
 
-    ultima = paquete.ultima_version(REPO)
+    # Con caché, como la otra estrategia. Sin ella, cada vez que la ventana
+    # preguntaba se consultaba GitHub, que sin credencial admite 60 consultas
+    # por hora: una ventana abierta todo el día acababa rechazada.
+    ahora = time.time()
+    if not forzar and _cache_release["dato"] and ahora - _cache_release["momento"] < CACHE_SEGUNDOS:
+        ultima = _cache_release["dato"]
+    else:
+        ultima = paquete.ultima_version(REPO)
+        if ultima is not None:
+            _cache_release.update(dato=ultima, momento=ahora)
     if ultima is None:
         return {
             "supported": True,

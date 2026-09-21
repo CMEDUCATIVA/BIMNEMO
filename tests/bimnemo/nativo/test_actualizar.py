@@ -211,3 +211,40 @@ def test_pip_y_git_se_lanzan_sin_ventana(monkeypatch):
     assert banderas == [actualizacion.SIN_VENTANA] * 2
     if sys.platform == "win32":
         assert actualizacion.SIN_VENTANA != 0
+
+
+# -- que se vea a tiempo ----------------------------------------------------
+
+
+def test_al_volver_a_la_ventana_se_pregunta_pero_no_a_cada_rato(ventana):
+    from PySide6.QtCore import QEvent
+
+    vigia = ventana.vigia
+    vigia._ultima = 0.0
+    ventana.motor.pedidos.clear()
+
+    vigia.eventFilter(ventana, QEvent(QEvent.WindowActivate))
+    vigia.eventFilter(ventana, QEvent(QEvent.WindowActivate))
+
+    assert ventana.motor.pedidos.count("/bimnemo/update") == 1
+
+
+def test_la_ultima_version_se_guarda_unos_minutos(monkeypatch, tmp_path):
+    """Sin caché, la ventana gastaba el cupo de GitHub —60 por hora—."""
+    from lightrag.api.bimnemo import actualizacion, paquete
+
+    consultas = []
+    monkeypatch.setattr(actualizacion, "_cache_release", {"momento": 0.0, "dato": None})
+    monkeypatch.setattr(actualizacion, "raiz", lambda: tmp_path)
+    (tmp_path / "VERSION").write_text("v1.4.1", encoding="utf-8")
+    monkeypatch.setattr(
+        paquete, "ultima_version", lambda repo: consultas.append(1) or {"tag_name": "v1.4.2"}
+    )
+
+    for _ in range(5):
+        estado = actualizacion._estado_release()
+    assert estado["behind"] is True
+    assert len(consultas) == 1
+
+    actualizacion._estado_release(forzar=True)
+    assert len(consultas) == 2
