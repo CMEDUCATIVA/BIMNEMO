@@ -39,16 +39,44 @@ COLUMNAS = (
     "Fecha",
     "Tipo",
     "Tarea",
+    "Archivo",
     "Modelo",
     "Llamadas",
     "Tokens entrada",
     "Tokens salida",
     "Coste (USD)",
 )
-FECHA, TIPO, TAREA, MODELO, LLAMADAS, ENTRADA, SALIDA, COSTE = range(len(COLUMNAS))
+(
+    FECHA,
+    TIPO,
+    TAREA,
+    ARCHIVO,
+    MODELO,
+    LLAMADAS,
+    ENTRADA,
+    SALIDA,
+    COSTE,
+) = range(len(COLUMNAS))
 NUMERICAS = (LLAMADAS, ENTRADA, SALIDA, COSTE)
 
 TIPOS = {"llm": "Lenguaje", "embedding": "Embeddings"}
+
+#: Tareas que no son de ningún archivo: salen de las preguntas del chat.
+DEL_CHAT = ("Responder", "Palabras clave")
+
+
+def archivo_de(fila: dict[str, Any]) -> str:
+    """A quién se carga la fila: el archivo, el chat, o «—» si no se sabe.
+
+    «—» es para lo contado antes de que el consumo guardara el archivo: no se
+    puede saber a posteriori y es mejor decirlo que adivinarlo.
+    """
+    archivo = str(fila.get("archivo") or "")
+    if archivo:
+        return archivo
+    if fila.get("tarea") in DEL_CHAT:
+        return "Preguntas del chat"
+    return "—"
 
 #: Filas que se ven sin desplazar. Con más, la tabla se desplaza por dentro
 #: en vez de empujar la lista de archivos hacia abajo.
@@ -103,12 +131,13 @@ class TarjetaConsumo(Tarjeta):
         cabecera.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         # Anchos a mano, como en «Almacenados»: `ResizeToContents` mide también
         # el relleno de la hoja de estilo e infla cada columna hasta sacar una
-        # barra horizontal. Solo el modelo se estira.
+        # barra horizontal. Solo el archivo se estira: es el nombre largo.
         cabecera.setMinimumSectionSize(60)
         for columna, ancho in (
             (FECHA, 96),
             (TIPO, 96),
             (TAREA, 116),
+            (MODELO, 170),
             (LLAMADAS, 80),
             (ENTRADA, 116),
             (SALIDA, 108),
@@ -116,7 +145,7 @@ class TarjetaConsumo(Tarjeta):
         ):
             cabecera.setSectionResizeMode(columna, QHeaderView.Interactive)
             self.tabla.setColumnWidth(columna, ancho)
-        cabecera.setSectionResizeMode(MODELO, QHeaderView.Stretch)
+        cabecera.setSectionResizeMode(ARCHIVO, QHeaderView.Stretch)
         for columna in NUMERICAS:
             item = self.tabla.horizontalHeaderItem(columna)
             if item is not None:
@@ -218,6 +247,7 @@ class TarjetaConsumo(Tarjeta):
                 FECHA: str(fila.get("fecha") or ""),
                 TIPO: TIPOS.get(str(fila.get("tipo")), str(fila.get("tipo") or "")),
                 TAREA: str(fila.get("tarea") or ""),
+                ARCHIVO: archivo_de(fila),
                 MODELO: str(fila.get("modelo") or ""),
                 LLAMADAS: miles(fila.get("llamadas") or 0),
                 ENTRADA: miles(fila.get("entrada") or 0),
@@ -228,7 +258,8 @@ class TarjetaConsumo(Tarjeta):
                 item = QTableWidgetItem(texto)
                 if columna in NUMERICAS:
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if columna == MODELO:
+                if columna in (ARCHIVO, MODELO):
+                    # Recortados con puntos suspensivos: el nombre entero, aquí.
                     item.setToolTip(texto)
                 self.tabla.setItem(i, columna, item)
 

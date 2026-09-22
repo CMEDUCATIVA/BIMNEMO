@@ -142,3 +142,62 @@ def test_si_contar_falla_la_llamada_sigue(registro, monkeypatch):
 
     monkeypatch.setattr(registro, "anotar", rompe)
     consumo.Contador("llm", "Indexar", "gpt-5-nano").add_usage({"prompt_tokens": 1})
+
+
+# --- a qué archivo se carga cada llamada -------------------------------------
+
+
+def test_la_marca_del_archivo_cruza_la_cola_de_lightrag(registro):
+    """Las llamadas pasan por la cola de prioridad del rol; la marca llega igual."""
+    from lightrag.utils import priority_limit_async_func_call
+
+    async def llamada(**kwargs):
+        kwargs["token_tracker"].add_usage({"prompt_tokens": 10, "completion_tokens": 5})
+        return "ok"
+
+    medida = consumo.medir_llm(llamada, "extract", "openai", "gpt-5-nano", "")
+    en_cola = priority_limit_async_func_call(2, queue_name="prueba-consumo")(medida)
+
+    async def indexar(nombre):
+        consumo.DOCUMENTO.set(nombre)
+        return await en_cola()
+
+    async def todo():
+        await asyncio.gather(indexar("ley.pdf"), indexar("bases.docx"))
+        await en_cola.shutdown()
+
+    asyncio.run(todo())
+    archivos = sorted(f["archivo"] for f in registro._filas.values())
+    assert archivos == ["bases.docx", "ley.pdf"]
+
+
+def test_fuera_de_una_indexacion_no_hay_archivo(registro):
+    consumo.Contador("llm", "Responder", "gpt-5-nano").add_usage({"prompt_tokens": 1})
+    assert _fila(registro, "gpt-5-nano")["archivo"] == ""
+
+
+def test_el_marcador_pone_el_nombre_del_archivo_mientras_se_procesa(monkeypatch):
+    from types import SimpleNamespace
+
+    from lightrag.pipeline import _PipelineMixin
+
+    vistos = []
+
+    async def procesar(self, **kwargs):
+        vistos.append(consumo.DOCUMENTO.get())
+
+    monkeypatch.setattr(_PipelineMixin, "process_single_document", procesar)
+    consumo.instalar_marcador()
+    consumo.instalar_marcador()  # no se envuelve dos veces
+
+    asyncio.run(
+        _PipelineMixin.process_single_document(
+            object(),
+            doc_id="doc-1",
+            status_doc=SimpleNamespace(file_path="C:/entrada/Normativas/ley.pdf"),
+            parsed_data={},
+            ctx=None,
+        )
+    )
+    assert vistos == ["ley.pdf"]
+    assert consumo.DOCUMENTO.get() == ""  # y se quita al terminar

@@ -218,3 +218,22 @@ def test_si_esta_indexando_dice_que_lo_guardado_no_se_usa(aplicacion):
     pantalla._tras_guardar = True
     pantalla._reiniciado(False, "409 ocupado")
     assert "NO se usa" in pantalla.estado.text()
+
+def test_la_tabla_dice_de_que_archivo_es_cada_gasto(aplicacion):
+    from lightrag.api.bimnemo.nativo.consumo import ARCHIVO, TarjetaConsumo
+
+    filas = [
+        {"fecha": "2026-09-22", "tipo": "llm", "tarea": "Indexar",
+         "archivo": "ley.pdf", "modelo": "deepseek-flash", "llamadas": 1,
+         "entrada": 1, "salida": 1, "coste": 0.1, "sin_precio": False},
+        {"fecha": "2026-09-22", "tipo": "llm", "tarea": "Responder",
+         "archivo": "", "modelo": "deepseek-flash", "llamadas": 1,
+         "entrada": 1, "salida": 1, "coste": 0.1, "sin_precio": False},
+        {"fecha": "2026-09-21", "tipo": "llm", "tarea": "Indexar",
+         "modelo": "deepseek-v4-pro", "llamadas": 1,
+         "entrada": 1, "salida": 1, "coste": 0.1, "sin_precio": False},
+    ]
+    tarjeta = TarjetaConsumo(_Motor(dict(USO, rows=filas, revision=99)))
+    assert tarjeta.tabla.item(0, ARCHIVO).text() == "ley.pdf"
+    assert tarjeta.tabla.item(1, ARCHIVO).text() == "Preguntas del chat"
+    assert tarjeta.tabla.item(2, ARCHIVO).text() == "—"

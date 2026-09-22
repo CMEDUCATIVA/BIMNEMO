@@ -37,6 +37,7 @@ modelo), y así un cierre brusco nunca lo deja a medias.
 
 from __future__ import annotations
 
+import contextvars
 import functools
 import json
 import os
@@ -50,6 +51,17 @@ from lightrag.api.bimnemo import precios
 from lightrag.utils import logger
 
 NOMBRE_FICHERO = "bimnemo_consumo.json"
+
+#: El archivo que se está indexando en esta tarea, para saber a quién cargar
+#: cada llamada. Vacío fuera de una indexación (una pregunta del chat).
+#:
+#: Llega hasta la llamada al proveedor aunque esta pase por la cola de
+#: prioridad del rol: ``priority_limit_async_func_call`` copia el contexto de
+#: quien encola (``contextvars.copy_context()``) y ejecuta la llamada dentro de
+#: él, y las tareas que crea el documento heredan el suyo al crearse.
+DOCUMENTO: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "bimnemo_documento", default=""
+)
 
 #: El rol del motor → la tarea que entiende quien mira la tabla.
 TAREAS = {
@@ -105,12 +117,13 @@ class _Registro:
         entrada: int,
         salida: int,
         momento: Optional[datetime] = None,
+        archivo: str = "",
     ) -> None:
         momento = momento or datetime.now(timezone.utc)
         p = precios.precio(tipo, modelo, host, momento)
         importe = precios.coste(p, entrada, salida)
         dia = momento.astimezone().date().isoformat()
-        clave = "|".join((dia, tipo, tarea, modelo))
+        clave = "|".join((dia, tipo, tarea, modelo, archivo))
 
         with self._cerrojo:
             fila = self._filas.setdefault(
@@ -120,6 +133,7 @@ class _Registro:
                     "tipo": tipo,
                     "tarea": tarea,
                     "modelo": modelo,
+                    "archivo": archivo,
                     "llamadas": 0,
                     "entrada": 0,
                     "salida": 0,
@@ -209,7 +223,13 @@ class Contador:
             total = int(cuentas.get("total_tokens") or 0)
             salida = max(completado, total - entrada) if total else completado
             REGISTRO.anotar(
-                self.tipo, self.tarea, self.modelo, self.host, entrada, max(salida, 0)
+                self.tipo,
+                self.tarea,
+                self.modelo,
+                self.host,
+                entrada,
+                max(salida, 0),
+                archivo=DOCUMENTO.get(),
             )
         except Exception as exc:  # medir nunca rompe la llamada que se mide
             logger.warning("BIMNEMO: no se pudo contar el consumo: %s", exc)
@@ -242,9 +262,38 @@ def contador_embeddings(binding: str, modelo: str, host: str) -> Optional[Contad
     return Contador("embedding", TAREAS["embedding"], modelo, host)
 
 
+def instalar_marcador() -> None:
+    """Marca en :data:`DOCUMENTO` el archivo que procesa cada tarea.
+
+    Envuelve ``process_single_document`` —el que lleva un documento de la
+    extracción a la fusión— en vez de editar la tubería de LightRAG: es un
+    solo punto, no cambia nada de lo que hace, y deja el motor intacto. Se
+    instala una vez; llamarlo de nuevo no lo envuelve dos veces.
+    """
+    from lightrag.pipeline import _PipelineMixin
+
+    original = _PipelineMixin.process_single_document
+    if getattr(original, "_bimnemo_marcado", False):
+        return
+
+    @functools.wraps(original)
+    async def marcado(self, *args, **kwargs):
+        estado = kwargs.get("status_doc")
+        ruta = str(getattr(estado, "file_path", "") or kwargs.get("doc_id") or "")
+        testigo = DOCUMENTO.set(Path(ruta).name if ruta else "")
+        try:
+            return await original(self, *args, **kwargs)
+        finally:
+            DOCUMENTO.reset(testigo)
+
+    marcado._bimnemo_marcado = True
+    _PipelineMixin.process_single_document = marcado
+
+
 def iniciar(carpeta: Path) -> None:
-    """Carga lo ya contado. Lo llama el servidor al arrancar."""
+    """Carga lo ya contado y empieza a marcar archivos. Lo llama el servidor."""
     REGISTRO.iniciar(carpeta)
+    instalar_marcador()
 
 
 __all__ = [

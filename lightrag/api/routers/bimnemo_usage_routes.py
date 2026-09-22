@@ -21,8 +21,9 @@ from ..utils_api import get_combined_auth_dependency
 class UsageResponse(BaseModel):
     rows: list[dict[str, Any]] = Field(
         description=(
-            "Una fila por día, tipo (llm/embedding), tarea y modelo: llamadas, "
-            "tokens de entrada y salida, coste en USD y si falta el precio"
+            "Una fila por día, tipo (llm/embedding), tarea, modelo y archivo "
+            "(vacío fuera de una indexación): llamadas, tokens de entrada y "
+            "salida, coste en USD y si falta el precio"
         )
     )
     totals: dict[str, dict[str, Any]] = Field(
