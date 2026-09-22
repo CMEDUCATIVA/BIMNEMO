@@ -379,6 +379,13 @@ def hoja(p: Paleta) -> str:
         font-weight: 600;
     }}
     QPushButton#principal:hover {{ background: {p.azul_hover}; }}
+    /* Desactivado, que se note: en azul lleno parecía pulsable y no hacía
+       nada (el aviso de nombres largos, «Guardar» mientras guarda). */
+    QPushButton#principal:disabled {{
+        background: {p.terciaria};
+        border-color: {p.terciaria};
+        color: {p.texto_3};
+    }}
     QPushButton#peligro {{
         background: transparent;
         border-color: #dc2626;

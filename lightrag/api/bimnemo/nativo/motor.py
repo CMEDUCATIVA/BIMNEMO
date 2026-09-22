@@ -172,12 +172,17 @@ class Motor(QObject):
         bien: Callable[[Any], None],
         mal: Optional[Callable[[str], None]] = None,
         avance: Optional[Callable[[int, int], None]] = None,
+        nombre: Optional[str] = None,
     ) -> None:
         """Sube un fichero como `multipart/form-data`, informando del avance.
 
         El fichero se lee **según se envía**, no entero a memoria: hay
         documentos de cientos de megas y cargarlos enteros para subirlos a
         `127.0.0.1` sería gastar el doble por nada.
+
+        ``nombre`` es con el que llega al motor, si no es el del disco: el
+        que se eligió en el aviso de nombre demasiado largo. El fichero del
+        PC no se toca.
         """
         from PySide6.QtCore import QFile
         from PySide6.QtNetwork import QHttpMultiPart, QHttpPart
@@ -185,7 +190,7 @@ class Motor(QObject):
         multi = QHttpMultiPart(QHttpMultiPart.FormDataType)
 
         parte = QHttpPart()
-        nombre = Path(fichero).name
+        nombre = nombre or Path(fichero).name
         parte.setHeader(
             QNetworkRequest.ContentDispositionHeader,
             f'form-data; name="file"; filename="{nombre}"',

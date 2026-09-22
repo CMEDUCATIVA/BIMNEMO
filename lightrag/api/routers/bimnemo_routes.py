@@ -45,6 +45,7 @@ from lightrag.utils import logger
 from ..utils_api import get_combined_auth_dependency, internal_server_error
 from .bimnemo_documents_routes import create_bimnemo_documents_routes
 from .bimnemo_update_routes import create_bimnemo_update_routes
+from .bimnemo_nombres_routes import create_bimnemo_nombres_routes
 from .bimnemo_usage_routes import create_bimnemo_usage_routes
 from .bimnemo_engine_routes import create_bimnemo_engine_routes
 from .bimnemo_settings_routes import create_bimnemo_settings_routes
@@ -570,6 +571,10 @@ def create_bimnemo_routes(
     # Cuánto se gasta en IA. No depende de ninguna memoria: es la cuenta del
     # proveedor.
     router.include_router(create_bimnemo_usage_routes(api_key))
+    # Si un nombre de archivo cabe en la ruta de Windows, y renombrarlo.
+    router.include_router(
+        create_bimnemo_nombres_routes(doc_manager, _resolve_rag, api_key)
+    )
 
     return router
 

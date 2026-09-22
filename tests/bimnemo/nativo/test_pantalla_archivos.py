@@ -442,3 +442,93 @@ def test_pausar_llama_a_la_ruta_de_la_memoria(pantalla):
 def test_un_documento_pausado_no_sale_como_fallido(pantalla):
     archivo = {"name": "ley.pdf", "status": "failed", "paused": True, "doc_id": "d"}
     assert pantalla._estado_de(archivo, "ley.pdf") == "pausado"
+
+# --- nombres demasiado largos -------------------------------------------------
+
+LARGO_16 = (
+    "7614342-16-bases-estandar-concurso-publico-abreviado-para-la-contratacion-"
+    "de-expertos-y-gerentes-de-proyectos.docx"
+)
+
+
+class _DialogoFalso:
+    """Acepta con lo propuesto, o cancela, sin abrir ninguna ventana."""
+
+    acepta = True
+    vistos: list = []
+
+    def __init__(self, padre, originales, limite_de, existentes, **_):
+        from lightrag.api.bimnemo import nombres
+
+        _DialogoFalso.vistos = list(originales)
+        self._nuevos = {o: nombres.sugerir(o, limite_de(o)) for o in originales}
+
+    def exec(self):
+        from PySide6.QtWidgets import QDialog
+
+        return QDialog.Accepted if _DialogoFalso.acepta else QDialog.Rejected
+
+    def resultado(self):
+        return self._nuevos
+
+
+def test_solo_preguntan_los_que_no_caben(pantalla):
+    pantalla.nombres.raiz = 87  # la carpeta real de Normativas_BIM
+    pantalla.nombres.dialogo = _DialogoFalso
+    _DialogoFalso.acepta = True
+
+    listos = pantalla.nombres.preparar(["C:/docs/corto.docx", f"C:/docs/{LARGO_16}"])
+
+    assert _DialogoFalso.vistos == [LARGO_16]
+    assert listos[0] == ("C:/docs/corto.docx", "corto.docx")
+    assert listos[1][0] == f"C:/docs/{LARGO_16}" and len(listos[1][1]) <= 57
+
+
+def test_cancelar_no_sube_esos_pero_si_los_demas(pantalla):
+    pantalla.nombres.raiz = 87
+    pantalla.nombres.dialogo = _DialogoFalso
+    _DialogoFalso.acepta = False
+
+    listos = pantalla.nombres.preparar(["C:/docs/corto.docx", f"C:/docs/{LARGO_16}"])
+    assert listos == [("C:/docs/corto.docx", "corto.docx")]
+
+
+def test_sin_saber_el_limite_no_se_frena_nada(pantalla):
+    pantalla.nombres.raiz = None
+    assert pantalla.nombres.preparar([f"C:/{LARGO_16}"]) == [(f"C:/{LARGO_16}", LARGO_16)]
+
+
+def test_la_fila_de_nombre_largo_ofrece_renombrar_y_no_reintentar(pantalla):
+    from lightrag.api.bimnemo.nativo.pantalla_archivos import ACCIONES
+
+    datos = dict(FICHEROS)
+    datos["files"] = [
+        dict(FICHEROS["files"][2], name=LARGO_16, name_too_long=True)
+    ]
+    pantalla._recibir(datos)
+    botones = _botones(pantalla.tabla.cellWidget(0, ACCIONES))
+    assert [b.toolTip() for b in botones][0] == "Renombrar y volver a leer"
+    assert not any("Reintentar" in b.toolTip() for b in botones)
+
+
+def test_el_aviso_cuenta_en_vivo_y_no_deja_seguir_si_no_cabe(aplicacion):
+    from PySide6.QtWidgets import QWidget
+
+    from lightrag.api.bimnemo.nativo.nombres_dialogo import DialogoNombres
+
+    padre = QWidget()  # que no lo recoja el recolector con el diálogo dentro
+    dialogo = DialogoNombres(padre, [LARGO_16], lambda _n: 57, frozenset())
+    fila = dialogo.filas[0]
+    assert dialogo.boton_seguir.isEnabled()  # la propuesta ya cabe
+    assert fila.contador.text().endswith("/ 57")
+
+    fila.campo.setText("x" * 80)
+    assert not dialogo.boton_seguir.isEnabled()
+    assert "caben 57" in fila.fallos.text()
+
+    fila.campo.setText("acta: final")
+    assert "no admite" in fila.fallos.text()
+
+    fila.campo.setText("BE-16 expertos")
+    assert dialogo.boton_seguir.isEnabled()
+    assert dialogo.resultado() == {LARGO_16: "BE-16 expertos.docx"}

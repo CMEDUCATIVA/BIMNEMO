@@ -269,6 +269,7 @@ async def summarize_memory(rag: Any) -> dict[str, Any]:
     failed_reason: Optional[str] = None
     copia_repetida: Optional[str] = None
     en_pausa: Optional[str] = None
+    nombres_largos: list[str] = []
 
     for record in documents.values():
         status_value = getattr(record.status, "value", str(record.status))
@@ -293,8 +294,14 @@ async def summarize_memory(rag: Any) -> dict[str, Any]:
             # Tampoco lo es una pausa: la pidió el usuario.
             if en_pausa is None:
                 en_pausa = _clean_reason(error)
+        elif nombre_demasiado_largo(error):
+            # Se juntan: diez avisos iguales sin decir cuáles no sirven.
+            nombres_largos.append(_nombre_de(record))
         elif failed_reason is None:
             failed_reason = _clean_reason(error)
+
+    if nombres_largos and failed_reason is None:
+        failed_reason = _aviso_nombres_largos(nombres_largos)
 
     aviso = copia_repetida or en_pausa
     return {
@@ -535,10 +542,31 @@ _RUTA = re.compile(r"'([A-Za-z]:\\[^']+)'")
 
 _RUTA_DEMASIADO_LARGA = (
     "El nombre del archivo es demasiado largo para Windows: al leerlo, "
-    "BIMNEMO crea carpetas con ese nombre y la ruta pasa del límite. "
-    "Renómbralo con un nombre más corto, bórralo en Archivos y vuelve a "
-    "subirlo."
+    "BIMNEMO crea carpetas con ese nombre y la ruta pasa del límite. Pulsa "
+    "«Renombrar» (✎) en su fila de Archivos: se renombra y se vuelve a leer, "
+    "sin subirlo otra vez."
 )
+
+
+def nombre_demasiado_largo(error_msg: Any) -> bool:
+    """¿Este fallo se arregla renombrando el archivo?"""
+    texto = " ".join(str(error_msg or "").split())
+    return _ruta_demasiado_larga(texto, texto.lower())
+
+
+def _aviso_nombres_largos(nombres_largos: list[str]) -> str:
+    """El aviso del Panel, **con los nombres**: sin ellos no se sabe cuáles son."""
+    cuantos = len(nombres_largos)
+    if cuantos == 1:
+        cabeza = f"«{nombres_largos[0]}» tiene el nombre demasiado largo para Windows."
+    else:
+        vistos = ", ".join(f"«{n}»" for n in nombres_largos[:2])
+        resto = f" y {cuantos - 2} más" if cuantos > 2 else ""
+        cabeza = (
+            f"{cuantos} archivos tienen el nombre demasiado largo para Windows: "
+            f"{vistos}{resto}."
+        )
+    return cabeza + " Ve a Archivos y pulsa «Renombrar» (✎) en cada uno."
 
 
 def _ruta_demasiado_larga(texto: str, minusculas: str) -> bool:
@@ -734,6 +762,7 @@ def merge_files_with_memory(
                     "error_msg": None,
                     "duplicate_of": None,
                     "paused": False,
+                    "name_too_long": False,
                 }
             )
         else:
@@ -757,6 +786,8 @@ def merge_files_with_memory(
                     # Parado desde la pantalla: se enseña «En pausa», no
                     # «Fallido».
                     "paused": pausado(error),
+                    # Se arregla renombrando: la fila ofrece «Renombrar».
+                    "name_too_long": nombre_demasiado_largo(error),
                 }
             )
         rows.append(payload)

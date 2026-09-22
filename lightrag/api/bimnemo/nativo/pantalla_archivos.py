@@ -28,6 +28,7 @@ from time import monotonic
 from typing import Any, Optional
 from urllib.parse import quote
 
+from lightrag.api.bimnemo.nativo.archivos_nombres import GuardianNombres
 from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -119,6 +120,13 @@ class PantallaArchivos(Pantalla):
         #: Las barras vivas, por nombre de fichero, para poder moverlas sin
         #: repintar la tabla entera.
         self._barras: dict[str, tuple[QProgressBar, QLabel]] = {}
+        #: Qué nombre cabe en la memoria abierta, y el aviso si no.
+        self.nombres = GuardianNombres(
+            motor,
+            self,
+            lambda: frozenset(str(f.get("name") or "") for f in self._filas),
+        )
+        self.nombres.cargar()
 
         self.aviso = Aviso()
         self.anadir(self.aviso)
@@ -312,6 +320,8 @@ class PantallaArchivos(Pantalla):
         cuanto uno se entera del cambio antes que el otro.
         """
         self._memoria = nombre
+        # Cuánto cabe depende de la memoria: su carpeta es parte de la ruta.
+        self.nombres.cargar()
         self._repintar()
 
     def refrescar(self) -> None:
@@ -628,7 +638,15 @@ class PantallaArchivos(Pantalla):
             )
             pausar.clicked.connect(self._pausar)
             caja.addWidget(pausar)
-        if estado in ("failed", "pausado") and doc_id:
+        nombre_fila = str(archivo.get("name") or "")
+        if archivo.get("name_too_long") or (
+            not archivo.get("status") and self.nombres.no_cabe(nombre_fila)
+        ):
+            # Se arregla renombrando, no reintentando: fallaría igual.
+            renombrar = self._boton_fila("editar", "Renombrar y volver a leer")
+            renombrar.clicked.connect(lambda: self._renombrar(nombre_fila))
+            caja.addWidget(renombrar)
+        elif estado in ("failed", "pausado") and doc_id:
             # Solo este documento: el botón está en su fila. Los demás
             # fallidos se quedan como están.
             reintentar = self._boton_fila(
@@ -732,9 +750,9 @@ class PantallaArchivos(Pantalla):
         self._subir_varios(rutas)
 
     def _subir_varios(self, rutas: list[str]) -> None:
-        for ruta in rutas:
-            if ruta:
-                self._subir(ruta)
+        # Los que no caben pasan antes por el aviso de nombre largo.
+        for ruta, nombre in self.nombres.preparar(rutas):
+            self._subir(ruta, nombre)
 
     def dragEnterEvent(self, evento: QDragEnterEvent) -> None:  # noqa: N802
         if evento.mimeData().hasUrls():
@@ -746,8 +764,8 @@ class PantallaArchivos(Pantalla):
         )
         evento.acceptProposedAction()
 
-    def _subir(self, ruta: str) -> None:
-        nombre = Path(ruta).name
+    def _subir(self, ruta: str, nombre: Optional[str] = None) -> None:
+        nombre = nombre or Path(ruta).name
         self._subiendo[nombre] = 0
         self._repintar()
 
@@ -775,7 +793,12 @@ class PantallaArchivos(Pantalla):
             self.aviso.fallar(f"{nombre}: {motivo}")
             self._repintar()
 
-        self.motor.subir("/documents/upload", ruta, acabo, no_pudo, avanzar)
+        if nombre == Path(ruta).name:
+            self.motor.subir("/documents/upload", ruta, acabo, no_pudo, avanzar)
+        else:
+            self.motor.subir(
+                "/documents/upload", ruta, acabo, no_pudo, avanzar, nombre=nombre
+            )
 
     # -- reindexar y reintentar ---------------------------------------------
 
@@ -817,6 +840,19 @@ class PantallaArchivos(Pantalla):
             hecho,
             self._fallo,
         )
+
+    def _renombrar(self, nombre: str) -> None:
+        def hecho(datos: Any) -> None:
+            datos = datos if isinstance(datos, dict) else {}
+            mensaje = str(datos.get("message") or "Renombrado.")
+            if datos.get("status") == "busy":
+                self.aviso.informar(mensaje)
+                return
+            self.aviso.acertar(mensaje)
+            self._cadencia(CADENCIA_ACTIVA)
+            self.refrescar()
+
+        self.nombres.renombrar(nombre, hecho, self._fallo)
 
     def _pausar(self) -> None:
         self.aviso.informar("Pausando la indexación…")

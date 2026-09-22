@@ -57,12 +57,12 @@ def test_sin_saldo_no_se_confunde_con_ir_demasiado_rapido():
 @pytest.mark.parametrize("raw", [RUTA_206, RUTA_3])
 def test_una_ruta_demasiado_larga_dice_que_se_renombre(raw):
     texto = _explica(raw)
-    assert "demasiado largo" in texto and "Renómbralo" in texto
+    assert "demasiado largo" in texto and "Renombrar" in texto
 
 
 def test_una_ruta_corta_que_no_existe_no_se_toma_por_larga():
     texto = _explica("[Errno 2] No such file or directory: 'C:\\datos\\a.txt'")
-    assert "Renómbralo" not in texto
+    assert "Renombrar" not in texto
 
 
 @pytest.mark.parametrize(
