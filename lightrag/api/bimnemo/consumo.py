@@ -118,12 +118,22 @@ class _Registro:
         salida: int,
         momento: Optional[datetime] = None,
         archivo: str = "",
+        nivel: str = "",
+        razonando: int = 0,
     ) -> None:
+        """Suma una llamada.
+
+        ``nivel`` es el razonamiento configurado para esa tarea al llamar
+        («Apagado», «Alto», «Lo que decida el modelo»…); ``razonando``, los
+        tokens de salida que el proveedor dice que fueron razonamiento. Con
+        los dos se ve si lo configurado se cumplió: «Apagado» con un 60 %
+        pensando es que el proveedor no hizo caso.
+        """
         momento = momento or datetime.now(timezone.utc)
         p = precios.precio(tipo, modelo, host, momento)
         importe = precios.coste(p, entrada, salida)
         dia = momento.astimezone().date().isoformat()
-        clave = "|".join((dia, tipo, tarea, modelo, archivo))
+        clave = "|".join((dia, tipo, tarea, modelo, archivo, nivel))
 
         with self._cerrojo:
             fila = self._filas.setdefault(
@@ -134,9 +144,11 @@ class _Registro:
                     "tarea": tarea,
                     "modelo": modelo,
                     "archivo": archivo,
+                    "nivel": nivel,
                     "llamadas": 0,
                     "entrada": 0,
                     "salida": 0,
+                    "razonando": 0,
                     "coste": 0.0,
                     "sin_precio": False,
                 },
@@ -144,6 +156,8 @@ class _Registro:
             fila["llamadas"] += 1
             fila["entrada"] += int(entrada)
             fila["salida"] += int(salida)
+            # Las filas de antes de contar el razonamiento no traen la clave.
+            fila["razonando"] = fila.get("razonando", 0) + int(razonando)
             if importe is None:
                 fila["sin_precio"] = True
             else:
@@ -210,11 +224,14 @@ REGISTRO = _Registro()
 class Contador:
     """El ``token_tracker`` que se le pasa a un binding para una llamada."""
 
-    def __init__(self, tipo: str, tarea: str, modelo: str, host: str = "") -> None:
+    def __init__(
+        self, tipo: str, tarea: str, modelo: str, host: str = "", nivel: str = ""
+    ) -> None:
         self.tipo = tipo
         self.tarea = tarea
         self.modelo = modelo or "?"
         self.host = host or ""
+        self.nivel = nivel
 
     def add_usage(self, cuentas: dict[str, Any]) -> None:
         try:
@@ -222,6 +239,12 @@ class Contador:
             completado = int(cuentas.get("completion_tokens") or 0)
             total = int(cuentas.get("total_tokens") or 0)
             salida = max(completado, total - entrada) if total else completado
+            # Lo que el proveedor dice que fue razonamiento. OpenAI y DeepSeek
+            # lo dan aparte (dentro de `completion`); Gemini no, pero lo que
+            # sobra del total por encima de lo visible es justo eso.
+            razonando = int(cuentas.get("reasoning_tokens") or 0) or max(
+                total - entrada - completado, 0
+            )
             REGISTRO.anotar(
                 self.tipo,
                 self.tarea,
@@ -230,26 +253,50 @@ class Contador:
                 entrada,
                 max(salida, 0),
                 archivo=DOCUMENTO.get(),
+                nivel=self.nivel,
+                razonando=min(razonando, max(salida, 0)),
             )
         except Exception as exc:  # medir nunca rompe la llamada que se mide
             logger.warning("BIMNEMO: no se pudo contar el consumo: %s", exc)
 
 
-def medir_llm(func, rol: str, binding: str, modelo: str, host: str):
+def _nivel(binding: str, modelo: str, host: str, opciones: dict[str, Any]) -> str:
+    """El razonamiento configurado para esa tarea, dicho como en la barra."""
+    try:
+        from lightrag.api.bimnemo import razonamiento
+        from lightrag.api.bimnemo.providers import match_provider
+
+        proveedor = match_provider("llm", binding, host) or binding
+        return razonamiento.nivel_de_opciones(proveedor, modelo, opciones or {})
+    except Exception as exc:  # una etiqueta no puede impedir medir
+        logger.warning("BIMNEMO: no se pudo saber el nivel de razonamiento: %s", exc)
+        return ""
+
+
+def medir_llm(
+    func,
+    rol: str,
+    binding: str,
+    modelo: str,
+    host: str,
+    opciones: Optional[dict[str, Any]] = None,
+):
     """Envuelve la función de un rol para que cuente lo que gasta.
 
     Solo para bindings que aceptan ``token_tracker``; al resto se les
     devuelve la función tal cual. Si quien llama ya trae su propio contador,
-    se respeta.
+    se respeta. ``opciones`` son las que el rol manda al proveedor; de ellas
+    sale el nivel de razonamiento que se apunta con cada llamada.
     """
     if binding not in CON_CONTADOR_LLM:
         return func
 
     tarea = TAREAS.get(rol, rol)
+    nivel = _nivel(binding, modelo, host, opciones or {})
 
     @functools.wraps(func)
     async def medida(*args, **kwargs):
-        kwargs.setdefault("token_tracker", Contador("llm", tarea, modelo, host))
+        kwargs.setdefault("token_tracker", Contador("llm", tarea, modelo, host, nivel))
         return await func(*args, **kwargs)
 
     return medida

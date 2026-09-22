@@ -361,6 +361,44 @@ def a_variables(
     return cambios
 
 
+#: Cada variable, con el nombre del campo que le llega al binding tras
+#: ``options_dict_for_role`` (el sufijo en minúsculas).
+_CAMPO = {
+    EFFORT: "reasoning_effort",
+    EXTRA_BODY: "extra_body",
+    GEMINI: "thinking_config",
+    OLLAMA: "think",
+}
+
+#: Rótulos para la tabla de consumo cuando no hay un nivel de la barra.
+SIN_CONTROL = "Sin control"
+A_MANO = "Ajuste a mano"
+
+
+def nivel_de_opciones(proveedor: str, modelo: str, opciones: dict[str, Any]) -> str:
+    """El nivel, en palabras, que corresponde a las opciones con que se llama.
+
+    Es el camino de vuelta de :func:`a_variables`: la tabla de consumo lo
+    apunta en cada llamada, para ver después con qué nivel se gastó qué.
+    """
+    e = esquema(proveedor, modelo)
+    puestas = {
+        base: opciones[campo]
+        for base, campo in _CAMPO.items()
+        if opciones.get(campo) not in (None, "", {})
+    }
+    if e is None:
+        return A_MANO if puestas else SIN_CONTROL
+    if not puestas:
+        return e.niveles[0].rotulo
+    for nivel in e.niveles:
+        if nivel.variables and puestas == {
+            k: _valor(v) for k, v in nivel.variables.items()
+        }:
+            return nivel.rotulo
+    return A_MANO
+
+
 def para_catalogo(proveedor: str, modelos: tuple[str, ...]) -> dict[str, Any]:
     """Los niveles de cada modelo, tal como los pinta la ventana."""
     salida: dict[str, Any] = {}
@@ -393,6 +431,7 @@ __all__ = [
     "a_variables",
     "esquema",
     "leer",
+    "nivel_de_opciones",
     "niveles_de",
     "para_catalogo",
     "valor_efectivo",

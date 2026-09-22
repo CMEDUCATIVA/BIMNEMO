@@ -37,10 +37,10 @@ SONDEO_MS = 3_000
 
 COLUMNAS = (
     "Fecha",
-    "Tipo",
     "Tarea",
     "Archivo",
     "Modelo",
+    "Razonamiento",
     "Llamadas",
     "Tokens entrada",
     "Tokens salida",
@@ -48,10 +48,10 @@ COLUMNAS = (
 )
 (
     FECHA,
-    TIPO,
     TAREA,
     ARCHIVO,
     MODELO,
+    RAZONAMIENTO,
     LLAMADAS,
     ENTRADA,
     SALIDA,
@@ -59,7 +59,9 @@ COLUMNAS = (
 ) = range(len(COLUMNAS))
 NUMERICAS = (LLAMADAS, ENTRADA, SALIDA, COSTE)
 
-TIPOS = {"llm": "Lenguaje", "embedding": "Embeddings"}
+#: El nivel «Lo que decida el modelo», abreviado: en la tabla no cabe entero
+#: junto al porcentaje.
+POR_DEFECTO = {"Lo que decida el modelo": "Por defecto"}
 
 #: Tareas que no son de ningún archivo: salen de las preguntas del chat.
 DEL_CHAT = ("Responder", "Palabras clave")
@@ -77,6 +79,26 @@ def archivo_de(fila: dict[str, Any]) -> str:
     if fila.get("tarea") in DEL_CHAT:
         return "Preguntas del chat"
     return "—"
+
+
+def razonamiento_de(fila: dict[str, Any]) -> str:
+    """El nivel configurado y, si el proveedor lo informa, cuánto se pensó.
+
+    «Por defecto · 68 % pensando». El porcentaje es de los tokens de salida,
+    que es lo que se paga caro. Si el proveedor no informa del razonamiento,
+    solo el nivel: un 0 % sería afirmar algo que no se sabe. Los embeddings
+    no razonan, y lo contado antes de este dato sale «—».
+    """
+    if fila.get("tipo") == "embedding":
+        return "—"
+    nivel = str(fila.get("nivel") or "") or "—"
+    nivel = POR_DEFECTO.get(nivel, nivel)
+    salida = int(fila.get("salida") or 0)
+    razonando = int(fila.get("razonando") or 0)
+    if salida and razonando:
+        return f"{nivel} · {round(razonando * 100 / salida)} % pensando"
+    return nivel
+
 
 #: Filas que se ven sin desplazar. Con más, la tabla se desplaza por dentro
 #: en vez de empujar la lista de archivos hacia abajo.
@@ -134,14 +156,14 @@ class TarjetaConsumo(Tarjeta):
         # barra horizontal. Solo el archivo se estira: es el nombre largo.
         cabecera.setMinimumSectionSize(60)
         for columna, ancho in (
-            (FECHA, 96),
-            (TIPO, 96),
-            (TAREA, 116),
-            (MODELO, 170),
-            (LLAMADAS, 80),
-            (ENTRADA, 116),
-            (SALIDA, 108),
-            (COSTE, 104),
+            (FECHA, 92),
+            (TAREA, 110),
+            (MODELO, 160),
+            (RAZONAMIENTO, 200),
+            (LLAMADAS, 76),
+            (ENTRADA, 110),
+            (SALIDA, 100),
+            (COSTE, 96),
         ):
             cabecera.setSectionResizeMode(columna, QHeaderView.Interactive)
             self.tabla.setColumnWidth(columna, ancho)
@@ -245,10 +267,10 @@ class TarjetaConsumo(Tarjeta):
         for i, fila in enumerate(filas):
             valores = {
                 FECHA: str(fila.get("fecha") or ""),
-                TIPO: TIPOS.get(str(fila.get("tipo")), str(fila.get("tipo") or "")),
                 TAREA: str(fila.get("tarea") or ""),
                 ARCHIVO: archivo_de(fila),
                 MODELO: str(fila.get("modelo") or ""),
+                RAZONAMIENTO: razonamiento_de(fila),
                 LLAMADAS: miles(fila.get("llamadas") or 0),
                 ENTRADA: miles(fila.get("entrada") or 0),
                 SALIDA: miles(fila.get("salida") or 0),
@@ -258,7 +280,7 @@ class TarjetaConsumo(Tarjeta):
                 item = QTableWidgetItem(texto)
                 if columna in NUMERICAS:
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if columna in (ARCHIVO, MODELO):
+                if columna in (ARCHIVO, MODELO, RAZONAMIENTO):
                     # Recortados con puntos suspensivos: el nombre entero, aquí.
                     item.setToolTip(texto)
                 self.tabla.setItem(i, columna, item)

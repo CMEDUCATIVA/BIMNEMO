@@ -143,13 +143,18 @@ USO = {
 
 
 def test_la_tarjeta_pinta_filas_y_totales(aplicacion):
-    from lightrag.api.bimnemo.nativo.consumo import COSTE, ENTRADA, TIPO, TarjetaConsumo
+    from lightrag.api.bimnemo.nativo.consumo import (
+        COSTE,
+        ENTRADA,
+        TAREA,
+        TarjetaConsumo,
+    )
 
     tarjeta = TarjetaConsumo(_Motor(USO))
     assert tarjeta.tabla.rowCount() == 2
     assert tarjeta.tabla.item(0, ENTRADA).text() == "252.000"
     assert tarjeta.tabla.item(0, COSTE).text() == "$0,1386"
-    assert tarjeta.tabla.item(1, TIPO).text() == "Embeddings"
+    assert tarjeta.tabla.item(1, TAREA).text() == "Embeddings"
     assert tarjeta.tabla.item(1, COSTE).text() == "sin precio"
     assert "$4,25 + ?" in tarjeta.totales.text()
     assert "2026-09-21" in tarjeta.pista.text()
@@ -183,8 +188,12 @@ def test_avisa_si_el_motor_no_usa_lo_guardado(aplicacion):
     """El caso real: se guardó flash, no se reinició, y se indexó con pro."""
     from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
 
-    datos = dict(USO, restart_required=True, saved_model="deepseek-flash",
-                 running_model="deepseek-v4-pro")
+    datos = dict(
+        USO,
+        restart_required=True,
+        saved_model="deepseek-flash",
+        running_model="deepseek-v4-pro",
+    )
     tarjeta = TarjetaConsumo(_Motor(datos))
     assert not tarjeta.pendiente.isHidden()
     assert "deepseek-v4-pro" in tarjeta.pendiente.text()
@@ -219,21 +228,76 @@ def test_si_esta_indexando_dice_que_lo_guardado_no_se_usa(aplicacion):
     pantalla._reiniciado(False, "409 ocupado")
     assert "NO se usa" in pantalla.estado.text()
 
+
 def test_la_tabla_dice_de_que_archivo_es_cada_gasto(aplicacion):
     from lightrag.api.bimnemo.nativo.consumo import ARCHIVO, TarjetaConsumo
 
     filas = [
-        {"fecha": "2026-09-22", "tipo": "llm", "tarea": "Indexar",
-         "archivo": "ley.pdf", "modelo": "deepseek-flash", "llamadas": 1,
-         "entrada": 1, "salida": 1, "coste": 0.1, "sin_precio": False},
-        {"fecha": "2026-09-22", "tipo": "llm", "tarea": "Responder",
-         "archivo": "", "modelo": "deepseek-flash", "llamadas": 1,
-         "entrada": 1, "salida": 1, "coste": 0.1, "sin_precio": False},
-        {"fecha": "2026-09-21", "tipo": "llm", "tarea": "Indexar",
-         "modelo": "deepseek-v4-pro", "llamadas": 1,
-         "entrada": 1, "salida": 1, "coste": 0.1, "sin_precio": False},
+        {
+            "fecha": "2026-09-22",
+            "tipo": "llm",
+            "tarea": "Indexar",
+            "archivo": "ley.pdf",
+            "modelo": "deepseek-flash",
+            "llamadas": 1,
+            "entrada": 1,
+            "salida": 1,
+            "coste": 0.1,
+            "sin_precio": False,
+        },
+        {
+            "fecha": "2026-09-22",
+            "tipo": "llm",
+            "tarea": "Responder",
+            "archivo": "",
+            "modelo": "deepseek-flash",
+            "llamadas": 1,
+            "entrada": 1,
+            "salida": 1,
+            "coste": 0.1,
+            "sin_precio": False,
+        },
+        {
+            "fecha": "2026-09-21",
+            "tipo": "llm",
+            "tarea": "Indexar",
+            "modelo": "deepseek-v4-pro",
+            "llamadas": 1,
+            "entrada": 1,
+            "salida": 1,
+            "coste": 0.1,
+            "sin_precio": False,
+        },
     ]
     tarjeta = TarjetaConsumo(_Motor(dict(USO, rows=filas, revision=99)))
     assert tarjeta.tabla.item(0, ARCHIVO).text() == "ley.pdf"
     assert tarjeta.tabla.item(1, ARCHIVO).text() == "Preguntas del chat"
     assert tarjeta.tabla.item(2, ARCHIVO).text() == "—"
+
+
+def test_la_tabla_dice_el_razonamiento_y_cuanto_se_penso(aplicacion):
+    from lightrag.api.bimnemo.nativo.consumo import RAZONAMIENTO, TarjetaConsumo
+
+    base = {
+        "fecha": "2026-09-22",
+        "tipo": "llm",
+        "tarea": "Indexar",
+        "archivo": "ley.pdf",
+        "modelo": "deepseek-flash",
+        "llamadas": 1,
+        "entrada": 1,
+        "coste": 0.1,
+        "sin_precio": False,
+    }
+    filas = [
+        dict(base, nivel="Lo que decida el modelo", salida=1000, razonando=680),
+        dict(base, nivel="Apagado", salida=1000, razonando=0),
+        dict(base, tipo="embedding", tarea="Embeddings", salida=0),
+        dict(base, salida=10),  # contado antes de guardar el nivel
+    ]
+    tarjeta = TarjetaConsumo(_Motor(dict(USO, rows=filas, revision=123)))
+    celda = lambda i: tarjeta.tabla.item(i, RAZONAMIENTO).text()  # noqa: E731
+    assert celda(0) == "Por defecto · 68 % pensando"
+    assert celda(1) == "Apagado"
+    assert celda(2) == "—"
+    assert celda(3) == "—"

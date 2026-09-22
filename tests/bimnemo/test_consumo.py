@@ -201,3 +201,104 @@ def test_el_marcador_pone_el_nombre_del_archivo_mientras_se_procesa(monkeypatch)
     )
     assert vistos == ["ley.pdf"]
     assert consumo.DOCUMENTO.get() == ""  # y se quita al terminar
+
+
+# --- el razonamiento de cada llamada ------------------------------------------
+
+
+def test_apunta_el_nivel_y_los_tokens_de_razonamiento(registro):
+    contador = consumo.Contador("llm", "Indexar", "deepseek-flash", "", "Apagado")
+    contador.add_usage(
+        {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "reasoning_tokens": 20,
+        }
+    )
+    fila = _fila(registro, "deepseek-flash")
+    assert (fila["nivel"], fila["razonando"]) == ("Apagado", 20)
+
+
+def test_en_gemini_el_razonamiento_es_lo_que_sobra_del_total(registro):
+    consumo.Contador("llm", "Indexar", "gemini-2.5-flash").add_usage(
+        {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 400}
+    )
+    assert _fila(registro, "gemini-2.5-flash")["razonando"] == 250
+
+
+def test_niveles_distintos_van_en_filas_distintas(registro):
+    for nivel in ("Apagado", "Alto"):
+        consumo.Contador("llm", "Indexar", "deepseek-flash", "", nivel).add_usage(
+            {"prompt_tokens": 1, "completion_tokens": 1}
+        )
+    assert len(registro._filas) == 2
+
+
+@pytest.mark.parametrize(
+    "proveedor,modelo,opciones,dice",
+    [
+        ("deepseek", "deepseek-flash", {}, "Lo que decida el modelo"),
+        (
+            "deepseek",
+            "deepseek-flash",
+            {"extra_body": {"thinking": {"type": "disabled"}}},
+            "Apagado",
+        ),
+        (
+            "deepseek",
+            "deepseek-flash",
+            {
+                "extra_body": {"thinking": {"type": "enabled"}},
+                "reasoning_effort": "high",
+            },
+            "Alto",
+        ),
+        ("openai", "gpt-5.6-luna", {"reasoning_effort": "none"}, "Apagado"),
+        (
+            "gemini",
+            "gemini-2.5-flash",
+            {"thinking_config": {"thinking_budget": 0}},
+            "Apagado",
+        ),
+        ("ollama", "qwen3:8b", {"think": False}, "Apagado"),
+        ("mistral", "mistral-small-latest", {}, "Sin control"),
+        ("deepseek", "deepseek-flash", {"extra_body": {"cosa": 1}}, "Ajuste a mano"),
+    ],
+)
+def test_de_las_opciones_de_la_llamada_al_nivel_de_la_barra(
+    proveedor, modelo, opciones, dice
+):
+    from lightrag.api.bimnemo import razonamiento
+
+    assert razonamiento.nivel_de_opciones(proveedor, modelo, opciones) == dice
+
+
+def test_medir_llm_saca_el_nivel_del_host(registro):
+    recibido = {}
+
+    async def llamada(**kwargs):
+        recibido.update(kwargs)
+
+    medida = consumo.medir_llm(
+        llamada,
+        "extract",
+        "openai",
+        "deepseek-flash",
+        "https://api.deepseek.com/v1",
+        opciones={"extra_body": {"thinking": {"type": "disabled"}}},
+    )
+    asyncio.run(medida())
+    assert recibido["token_tracker"].nivel == "Apagado"
+
+
+def test_el_conector_de_openai_pasa_los_tokens_de_razonamiento():
+    from types import SimpleNamespace
+
+    from lightrag.llm.openai import _reasoning_tokens
+
+    uso = SimpleNamespace(
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=42)
+    )
+    assert _reasoning_tokens(uso) == 42
+    assert _reasoning_tokens(SimpleNamespace()) == 0

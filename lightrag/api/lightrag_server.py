@@ -2210,6 +2210,7 @@ def create_app(args):
             settings["binding"],
             settings["model"],
             settings["host"] or "",
+            opciones=settings["provider_options"] or {},
         )
 
     def _create_role_llm_func(role: str, settings: dict[str, Any]):

@@ -282,6 +282,31 @@ def create_openai_async_client(
         return AsyncOpenAI(**merged_configs)
 
 
+def _reasoning_tokens(usage: Any) -> int:
+    """Hidden reasoning tokens inside ``completion_tokens`` (0 if not reported).
+
+    OpenAI and DeepSeek report them under ``completion_tokens_details``. An
+    extra key for token trackers that want to show how much of the output was
+    thinking; trackers that ignore it are unaffected.
+    """
+    details = getattr(usage, "completion_tokens_details", None)
+    try:
+        return int(getattr(details, "reasoning_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _add_reasoning_tokens(token_counts: dict[str, Any], usage: Any) -> None:
+    """Add ``reasoning_tokens`` only when the provider reported some.
+
+    Keeps the tracker payload exactly ``prompt/completion/total`` for every
+    call without hidden reasoning, as token trackers have always received it.
+    """
+    reasoning = _reasoning_tokens(usage)
+    if reasoning:
+        token_counts["reasoning_tokens"] = reasoning
+
+
 # Token-limit-truncated completions (finish_reason == "length") are returned
 # wrapped in TruncatedResponse so the cache layer skips persisting incomplete
 # output. See the "Note on truncated structured output" in the docstring below.
@@ -673,6 +698,7 @@ async def openai_complete_if_cache(
                         ),
                         "total_tokens": getattr(final_chunk_usage, "total_tokens", 0),
                     }
+                    _add_reasoning_tokens(token_counts, final_chunk_usage)
                     token_tracker.add_usage(token_counts)
                     logger.debug(f"Streaming token usage (from API): {token_counts}")
                 elif token_tracker:
@@ -786,6 +812,7 @@ async def openai_complete_if_cache(
                     ),
                     "total_tokens": getattr(response.usage, "total_tokens", 0),
                 }
+                _add_reasoning_tokens(token_counts, response.usage)
                 token_tracker.add_usage(token_counts)
 
             if (
