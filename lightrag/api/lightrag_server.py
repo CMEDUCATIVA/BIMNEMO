@@ -812,6 +812,12 @@ def create_optimized_embedding_function(
         document_prefix_configured=args.embedding_document_prefix_configured,
     )
 
+    # BIMNEMO: the consumption table needs the model name even when the
+    # binding falls back to its own default.
+    from lightrag.api.bimnemo import consumo
+
+    embedding_model = model or getattr(provider_func, "model_name", None) or ""
+
     # Step 3: Create optimized embedding function (calls underlying function directly)
     # Note: When model is None, each binding will use its own default model
     async def optimized_embedding_function(
@@ -957,6 +963,10 @@ def create_optimized_embedding_function(
                 }
                 if model:
                     kwargs["model"] = model
+                # BIMNEMO: real token usage for the consumption table.
+                contador = consumo.contador_embeddings(binding, embedding_model, host)
+                if contador is not None:
+                    kwargs["token_tracker"] = contador
                 task_type = gemini_options.get("task_type")
                 if task_type is not None:
                     kwargs["task_type"] = task_type
@@ -998,6 +1008,10 @@ def create_optimized_embedding_function(
                 }
                 if model:
                     kwargs["model"] = model
+                # BIMNEMO: real token usage for the consumption table.
+                contador = consumo.contador_embeddings(binding, embedding_model, host)
+                if contador is not None:
+                    kwargs["token_tracker"] = contador
                 if provider_supports_asymmetric and asymmetric_opt_in:
                     kwargs["context"] = context
                     if query_prefix:
@@ -2181,8 +2195,25 @@ def create_app(args):
         }
 
     def create_role_llm_func(role: str, override_meta: dict | None = None):
-        """Create an independent raw LLM function for a role."""
+        """Create an independent raw LLM function for a role.
+
+        BIMNEMO: the function is wrapped so every call reports its real token
+        usage to the consumption table (``bimnemo/consumo.py``). The wrapper
+        only adds the ``token_tracker`` kwarg the bindings already accept.
+        """
+        from lightrag.api.bimnemo import consumo
+
         settings = resolve_role_llm_settings(role, override_meta)
+        return consumo.medir_llm(
+            _create_role_llm_func(role, settings),
+            role,
+            settings["binding"],
+            settings["model"],
+            settings["host"] or "",
+        )
+
+    def _create_role_llm_func(role: str, settings: dict[str, Any]):
+        """The provider call for a role, built from its resolved settings."""
         role_binding = settings["binding"]
         role_model = settings["model"]
         role_host = settings["host"]
@@ -2646,6 +2677,11 @@ def create_app(args):
     # instance above stays the one every existing router uses.
     nemo_registry = NemoRegistry(working_dir=Path(args.working_dir))
     nemo_registry.load()
+    # BIMNEMO: what was already spent, so the consumption table survives a
+    # restart. Global to every NEMO: the bill is per provider account.
+    from lightrag.api.bimnemo import consumo
+
+    consumo.iniciar(Path(args.working_dir))
     # The server's configured workspace IS a memory with data in it. Leaving
     # it unregistered would make it invisible in the UI while still being the
     # one that answers.

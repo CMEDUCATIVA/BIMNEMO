@@ -28,6 +28,8 @@ from time import monotonic
 from typing import Any, Optional
 from urllib.parse import quote
 
+from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
+
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
@@ -122,6 +124,9 @@ class PantallaArchivos(Pantalla):
         self.anadir(self.aviso)
         self.anadir(self._acciones())
         self.anadir(self._zona())
+        # Debajo de la zona de arrastre: subir es lo que dispara el gasto.
+        self.consumo = TarjetaConsumo(motor)
+        self.anadir(self.consumo)
         self.anadir(self._almacenados())
         self.cerrar_con_espacio()
 

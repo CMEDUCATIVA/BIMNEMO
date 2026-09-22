@@ -27,7 +27,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from lightrag.api.bimnemo import embedding_anterior
+from lightrag.api.bimnemo import embedding_anterior, razonamiento
 from lightrag.api.bimnemo.runtime import (
     CONFIGURABLE_ENV_KEYS,
     RESTART_EXIT_CODE as _RESTART_EXIT_CODE,
@@ -101,6 +101,14 @@ class SectionSettings(BaseModel):
     )
     dim: Optional[int] = Field(
         default=None, description="Dimensión del embedding (solo embeddings)"
+    )
+    reasoning: Optional[dict[str, str]] = Field(
+        default=None,
+        description=(
+            "Solo LLM. Nivel de razonamiento por barra: {'indexar': id, "
+            "'responder': id}. '' = lo que decida el modelo; 'manual' = no tocar. "
+            "Sin este campo no se toca nada."
+        ),
     )
 
 
@@ -182,6 +190,13 @@ class SaveSettingsRequest(BaseModel):
 
             if kind == "embedding" and section.dim:
                 updates["EMBEDDING_DIM"] = str(section.dim)
+
+            if kind == "llm" and section.reasoning is not None:
+                updates.update(
+                    razonamiento.a_variables(
+                        section.provider, model, section.reasoning
+                    )
+                )
 
         if self.language is not None:
             idioma = self.language.strip()
@@ -490,6 +505,15 @@ def _section_view(values: dict[str, str], kind: str) -> dict[str, Any]:
     if kind == "embedding":
         raw_dim = values.get("EMBEDDING_DIM", "")
         view["dim"] = int(raw_dim) if raw_dim.isdigit() else None
+    if kind == "llm":
+        # Los niveles del modelo guardado, aunque no esté en el catálogo: uno
+        # escrito a mano también puede tener barra.
+        view["reasoning"] = razonamiento.leer(
+            values, view["provider"], view["model"]
+        )
+        view["reasoning_levels"] = razonamiento.niveles_de(
+            view["provider"], view["model"]
+        )
     return view
 
 
@@ -517,6 +541,12 @@ def _settings_differ_from_running(values: dict[str, str]) -> bool:
         if stored is None:
             continue
         if os.getenv(key, "") != stored:
+            return True
+    # Las del razonamiento se comparan también cuando NO están: apagar una
+    # barra comenta la variable, y el proceso que arrancó con ella la sigue
+    # teniendo hasta reiniciar.
+    for key in razonamiento.GESTIONADAS:
+        if (os.getenv(key) or "") != razonamiento.valor_efectivo(values.get(key)):
             return True
     return False
 

@@ -62,6 +62,20 @@ CONFIGURABLE_ENV_KEYS: frozenset[str] = frozenset(
         # no apagaría nada — la clave heredada del proceso padre seguiría
         # ganando y la API seguiría pidiéndola.
         "LIGHTRAG_API_KEY",
+        # Las barras de razonamiento (`bimnemo/razonamiento.py`): por rol del
+        # motor, las cuatro formas que tienen los bindings de controlarlo.
+        # Escritas a mano y no importadas: este módulo no importa nada. Una
+        # prueba comprueba que coinciden con `razonamiento.GESTIONADAS`.
+        *(
+            f"{rol}_{base}"
+            for rol in ("EXTRACT", "KEYWORD", "QUERY")
+            for base in (
+                "OPENAI_LLM_REASONING_EFFORT",
+                "OPENAI_LLM_EXTRA_BODY",
+                "GEMINI_LLM_THINKING_CONFIG",
+                "OLLAMA_LLM_THINK",
+            )
+        ),
     }
 )
 

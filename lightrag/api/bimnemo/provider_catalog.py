@@ -156,6 +156,7 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
         host="https://api.openai.com/v1",
         models=(
             "gpt-5.6-luna",
+            "gpt-5-nano",
             "gpt-5.6-terra",
             "gpt-5.6-sol",
             "gpt-6-astra",
@@ -164,8 +165,8 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
         key_hint="platform.openai.com/api-keys",
         key_url="https://platform.openai.com/api-keys",
         note=(
-            "«luna» es el barato y basta de sobra para extraer entidades, que "
-            "es lo que más se gasta; «astra» es el más capaz."
+            "«nano» es el más barato; «luna» basta de sobra para extraer "
+            "entidades, que es lo que más se gasta; «astra» es el más capaz."
         ),
     ),
     Provider(
@@ -219,6 +220,7 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
             "gemini-3.5-flash-lite",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
         ),
         needs_key=True,
         key_hint="aistudio.google.com/apikey",
@@ -361,10 +363,14 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
         binding="openai",
         group=COMPATIBLE,
         host="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        models=("qwen-plus", "qwen-turbo", "qwen-max", "qwen3-max"),
+        models=("qwen3.7-flash", "qwen-turbo", "qwen-plus", "qwen-max", "qwen3-max"),
         needs_key=True,
         key_hint="dashscope.console.aliyun.com/apiKey",
         key_url="https://dashscope.console.aliyun.com/apiKey",
+        note=(
+            "qwen3.7-flash es de lo más barato del mercado para indexar; "
+            "piensa por defecto, apágalo en la barra de razonamiento."
+        ),
     ),
     Provider(
         key="zhipu",

@@ -134,10 +134,21 @@ def match_provider(kind: Kind, binding: str, host: str) -> str:
 
 
 def catalog_payload() -> dict[str, Any]:
-    """El catálogo entero, tal y como lo consume la vista."""
+    """El catálogo entero, tal y como lo consume la vista.
 
-    def serialize(provider: Provider) -> dict[str, Any]:
+    ``reasoning`` lleva, por modelo, los niveles de la barra de razonamiento.
+    Se calcula de ``razonamiento.esquema`` y no se escribe en las tablas: el
+    control depende del modelo, no del proveedor, y así hay una sola fuente.
+    """
+    from lightrag.api.bimnemo import razonamiento
+
+    def serialize(provider: Provider, kind: str) -> dict[str, Any]:
         return {
+            "reasoning": (
+                razonamiento.para_catalogo(provider.key, provider.models)
+                if kind == "llm"
+                else {}
+            ),
             "key": provider.key,
             "label": provider.label,
             "binding": provider.binding,
@@ -154,7 +165,8 @@ def catalog_payload() -> dict[str, Any]:
         }
 
     return {
-        kind: [serialize(p) for p in providers] for kind, providers in _BY_KIND.items()
+        kind: [serialize(p, kind) for p in providers]
+        for kind, providers in _BY_KIND.items()
     }
 
 

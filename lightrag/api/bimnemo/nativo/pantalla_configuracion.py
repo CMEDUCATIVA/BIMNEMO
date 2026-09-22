@@ -38,6 +38,7 @@ from lightrag.api.bimnemo.nativo.piezas import (
     RejillaTarjetas,
     Tarjeta,
 )
+from lightrag.api.bimnemo.nativo.razonamiento_control import ControlRazonamiento
 from lightrag.api.bimnemo.nativo.reinicio import Reinicio, conectar_barra
 
 #: Las tres secciones configurables, con el nombre que se le enseña a quien
@@ -134,6 +135,14 @@ class Seccion(QWidget):
         self.api_key.setEchoMode(QLineEdit.Password)
         self._fila("Clave de API", self.api_key)
 
+        # Solo el modelo de lenguaje razona. Los niveles dependen del modelo,
+        # no del proveedor: se rehacen cada vez que cambia uno de los dos.
+        self.razonamiento: Optional[ControlRazonamiento] = None
+        self._razonamiento_guardado: dict[str, Any] = {}
+        if clave == "llm":
+            self.razonamiento = ControlRazonamiento()
+            self.tarjeta.anadir(self.razonamiento)
+
         self.pista = QLabel()
         self.pista.setObjectName("descripcion")
         self.pista.setWordWrap(True)
@@ -189,6 +198,26 @@ class Seccion(QWidget):
         self.api_key.clear()
         self._pintar_pista()
 
+        if self.razonamiento is not None:
+            self._razonamiento_guardado = dict(valores)
+            self._poner_razonamiento(valores.get("reasoning") or {})
+
+    def _poner_razonamiento(self, elegidos: dict[str, str]) -> None:
+        """Los niveles del modelo marcado y, encima, lo que había elegido.
+
+        Del catálogo si el modelo está en él; si no, los que calculó el motor
+        para el modelo guardado (uno escrito a mano también puede tener barra).
+        """
+        if self.razonamiento is None:
+            return
+        modelo = self.modelo_actual()
+        info = ((self._elegido() or {}).get("reasoning") or {}).get(modelo)
+        guardado = self._razonamiento_guardado
+        if info is None and modelo == guardado.get("model"):
+            info = guardado.get("reasoning_levels")
+        self.razonamiento.poner_niveles(info)
+        self.razonamiento.poner_elegidos(elegidos)
+
     def _elegido(self) -> Optional[dict[str, Any]]:
         clave = self.proveedor.currentData()
         for p in self._catalogo:
@@ -209,6 +238,9 @@ class Seccion(QWidget):
         modelos = elegido.get("models") or []
         self._poner_modelos(elegido, modelos[0] if modelos else "")
         self._pintar_pista()
+        # Con otro modelo, lo que decida el modelo: un nivel de otro proveedor
+        # podría no existir en este, y un ajuste a mano tampoco le serviría.
+        self._poner_razonamiento({})
 
     def _poner_modelos(
         self, proveedor: Optional[dict[str, Any]], elegir: Optional[str] = None
@@ -254,18 +286,21 @@ class Seccion(QWidget):
         self._modelo_anterior = nombre
 
     def _modelo_elegido(self, indice: int) -> None:
+        anterior = self._modelo_anterior
         if self.modelo.itemData(indice) != OTRO_MODELO:
             self._modelo_anterior = self.modelo_actual()
-            return
-        texto, aceptado = QInputDialog.getText(
-            self,
-            "Otro modelo",
-            "Nombre exacto del modelo, tal como lo da el proveedor:",
-        )
-        # Cancelar deja el que había, no «Otro modelo…» marcado.
-        self._elegir_modelo(
-            texto.strip() if aceptado and texto.strip() else self._modelo_anterior
-        )
+        else:
+            texto, aceptado = QInputDialog.getText(
+                self,
+                "Otro modelo",
+                "Nombre exacto del modelo, tal como lo da el proveedor:",
+            )
+            # Cancelar deja el que había, no «Otro modelo…» marcado.
+            self._elegir_modelo(
+                texto.strip() if aceptado and texto.strip() else anterior
+            )
+        if self.modelo_actual() != anterior:
+            self._poner_razonamiento({})
 
     def _pintar_pista(self) -> None:
         elegido = self._elegido() or {}
@@ -296,6 +331,8 @@ class Seccion(QWidget):
         escrita = self.api_key.text().strip()
         if escrita:
             datos["api_key"] = escrita
+        if self.razonamiento is not None:
+            datos["reasoning"] = self.razonamiento.elegidos()
         # Si no escribió nada, no se manda la clave: así no se borra la que
         # ya estaba por el hecho de guardar otro campo.
         return datos
