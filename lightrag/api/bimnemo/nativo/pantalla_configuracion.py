@@ -721,7 +721,10 @@ class PantallaConfiguracion(Pantalla):
         # antes y todavía sin aplicar, que es justo cuando más falta hace.
         cambio = not isinstance(datos, dict) or datos.get("restart_required", True)
         if not cambio and not self._pendiente:
-            self.estado.acertar("No había nada que cambiar.")
+            # O no cambió nada, o era solo el razonamiento y el motor ya lo
+            # aplicó en caliente: lo dice su mensaje.
+            mensaje = datos.get("message") if isinstance(datos, dict) else ""
+            self.estado.acertar(mensaje or "No había nada que cambiar.")
             self.refrescar()
             return
         self.estado.informar("Guardado. Reiniciando el motor para aplicarlo…")

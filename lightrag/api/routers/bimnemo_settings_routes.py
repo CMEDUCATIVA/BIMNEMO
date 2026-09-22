@@ -7,10 +7,12 @@ router — así que desde fuera siguen siendo un solo prefijo ``/bimnemo``.
 
 Lo que hay que tener presente al tocar esto:
 
-* **No se aplica nada en caliente, y no se puede.** El motor construye sus
-  funciones de LLM y de embeddings al arrancar a partir de estas variables.
-  Guardar escribe el ``.env`` y devuelve ``restart_required``; aplicarlo es
-  reiniciar el proceso.
+* **Casi nada se aplica en caliente.** El motor construye sus funciones de
+  LLM y de embeddings al arrancar a partir de estas variables: guardar escribe
+  el ``.env`` y devuelve ``restart_required``, y aplicarlo es reiniciar. La
+  excepción es el **razonamiento**: LightRAG sabe cambiar las opciones de un
+  rol en marcha, y ``razonamiento.aplicar_en_caliente`` lo hace sin reiniciar,
+  también con la tubería indexando.
 * **Lista blanca de claves.** Este router configura la IA; no es una vía para
   reescribir cualquier variable del despliegue.
 * **Las claves de API no vuelven al navegador.** De ellas solo se dice si
@@ -28,10 +30,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from lightrag.api.bimnemo import embedding_anterior, razonamiento
-from lightrag.api.bimnemo.runtime import (
-    CONFIGURABLE_ENV_KEYS,
-    RESTART_EXIT_CODE as _RESTART_EXIT_CODE,
-)
 from lightrag.api.bimnemo.envfile import (
     UNCHANGED,
     clave_puesta,
@@ -39,6 +37,12 @@ from lightrag.api.bimnemo.envfile import (
     write_env,
 )
 from lightrag.api.bimnemo.providers import catalog_payload, find, match_provider
+from lightrag.api.bimnemo.runtime import (
+    CONFIGURABLE_ENV_KEYS,
+)
+from lightrag.api.bimnemo.runtime import (
+    RESTART_EXIT_CODE as _RESTART_EXIT_CODE,
+)
 from lightrag.utils import logger
 
 from ..utils_api import get_combined_auth_dependency
@@ -193,9 +197,7 @@ class SaveSettingsRequest(BaseModel):
 
             if kind == "llm" and section.reasoning is not None:
                 updates.update(
-                    razonamiento.a_variables(
-                        section.provider, model, section.reasoning
-                    )
+                    razonamiento.a_variables(section.provider, model, section.reasoning)
                 )
 
         if self.language is not None:
@@ -227,7 +229,24 @@ class RestartResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def create_bimnemo_settings_routes(rag, api_key: Optional[str] = None) -> APIRouter:
+def _instancias_vivas(rag: Any, manager: Any) -> list[Any]:
+    """La instancia por defecto y cada NEMO abierta, sin repetir ni abrir ninguna.
+
+    Las dormidas no hace falta tocarlas: al abrirse construyen sus roles
+    leyendo el entorno, que ya lleva el valor nuevo.
+    """
+    vistas: dict[int, Any] = {id(rag): rag}
+    if manager is not None:
+        for nemo_id in manager.live_ids():
+            instancia = manager.peek(nemo_id)
+            if instancia is not None:
+                vistas.setdefault(id(instancia), instancia)
+    return list(vistas.values())
+
+
+def create_bimnemo_settings_routes(
+    rag, api_key: Optional[str] = None, manager: Any = None
+) -> APIRouter:
     """Router de la configuración de IA.
 
     **Sin prefijo propio a propósito.** Se incluye dentro del router de
@@ -334,16 +353,51 @@ def create_bimnemo_settings_routes(rag, api_key: Optional[str] = None) -> APIRou
         logger.info(
             "BIMNEMO: configuración guardada (%s)", ", ".join(changed) or "sin cambios"
         )
+
+        # El razonamiento se aplica en caliente, también con la tubería
+        # indexando: LightRAG sabe cambiar las opciones de un rol en marcha.
+        # El resto (proveedor, modelo, embeddings) se construye al arrancar y
+        # sigue pidiendo reinicio.
+        de_razonamiento = {
+            k: v for k, v in updates.items() if k in razonamiento.GESTIONADAS
+        }
+        en_caliente = False
+        if de_razonamiento and set(changed) & razonamiento.GESTIONADAS:
+            try:
+                roles = razonamiento.aplicar_en_caliente(
+                    _instancias_vivas(rag, manager), de_razonamiento
+                )
+                en_caliente = bool(roles)
+                logger.info(
+                    "BIMNEMO: razonamiento aplicado sin reiniciar (%s)",
+                    ", ".join(roles),
+                )
+            except Exception as exc:
+                # Si no se pudo, queda lo de siempre: reiniciar lo aplica.
+                logger.warning(
+                    "BIMNEMO: no se pudo aplicar el razonamiento en caliente: %s", exc
+                )
+        resto = [
+            k for k in changed if not (en_caliente and k in razonamiento.GESTIONADAS)
+        ]
+
+        if resto:
+            mensaje = (
+                "Configuración guardada. Reinicia BIMNEMO para que el motor la use."
+            )
+        elif en_caliente:
+            mensaje = (
+                "Razonamiento aplicado al momento: las próximas llamadas ya lo usan. "
+                "Las que estaban en marcha terminan con el nivel anterior."
+            )
+        else:
+            mensaje = "No había nada que cambiar."
         return SaveSettingsResponse(
             saved=True,
             env_path=str(_env_path()),
             changed=changed,
-            restart_required=bool(changed),
-            message=(
-                "Configuración guardada. Reinicia BIMNEMO para que el motor la use."
-                if changed
-                else "No había nada que cambiar."
-            ),
+            restart_required=bool(resto),
+            message=mensaje,
         )
 
     @router.post(
@@ -508,9 +562,7 @@ def _section_view(values: dict[str, str], kind: str) -> dict[str, Any]:
     if kind == "llm":
         # Los niveles del modelo guardado, aunque no esté en el catálogo: uno
         # escrito a mano también puede tener barra.
-        view["reasoning"] = razonamiento.leer(
-            values, view["provider"], view["model"]
-        )
+        view["reasoning"] = razonamiento.leer(values, view["provider"], view["model"])
         view["reasoning_levels"] = razonamiento.niveles_de(
             view["provider"], view["model"]
         )

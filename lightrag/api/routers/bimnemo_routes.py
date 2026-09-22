@@ -558,7 +558,8 @@ def create_bimnemo_routes(
     )
     # La configuración de IA vive en su propio módulo y se monta aquí, de
     # modo que el servidor sigue dando de alta un solo router de BIMNEMO.
-    router.include_router(create_bimnemo_settings_routes(rag, api_key))
+    # Con el gestor, para aplicar el razonamiento en caliente a cada NEMO abierta.
+    router.include_router(create_bimnemo_settings_routes(rag, api_key, manager))
     # `_resolve_rag` se inyecta por lo mismo que en el router del motor: una
     # segunda resolución acabaría discrepando, y se borraría en otra memoria.
     router.include_router(

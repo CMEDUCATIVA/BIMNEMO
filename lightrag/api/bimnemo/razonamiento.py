@@ -399,6 +399,60 @@ def nivel_de_opciones(proveedor: str, modelo: str, opciones: dict[str, Any]) -> 
     return A_MANO
 
 
+def aplicar_en_caliente(
+    instancias: list[Any], cambios: dict[str, Optional[str]]
+) -> list[str]:
+    """Aplica el nuevo nivel a las memorias abiertas, **sin reiniciar**.
+
+    Existe porque el usuario movió la barra con un documento indexándose y
+    no pasó nada: el motor solo leía estas variables al arrancar, y reiniciar
+    se niega con la tubería ocupada. LightRAG sí sabe cambiar las opciones de
+    un rol en marcha (``update_llm_role_config``): monta la función nueva con
+    el constructor registrado y retira la cola vieja **dejando terminar** lo
+    que ya estaba en ella. Las llamadas siguientes salen con el nivel nuevo.
+
+    ``cambios`` es lo que :func:`a_variables` escribió en el ``.env``. Se
+    reflejan también en ``os.environ``: así una memoria que se abra después
+    —que construye sus roles leyendo el entorno— nace ya con el nivel nuevo,
+    y «hay configuración sin aplicar» deja de ser verdad.
+
+    Devuelve los roles que se actualizaron.
+    """
+    import os
+
+    hechos: list[str] = []
+    for roles in BARRAS.values():
+        for rol in roles:
+            campos = {
+                campo: cambios[f"{rol}_{base}"]
+                for base, campo in _CAMPO.items()
+                if f"{rol}_{base}" in cambios
+            }
+            if not campos:
+                continue
+            for instancia in instancias:
+                actual = instancia.get_llm_role_config(rol.lower())
+                opciones = dict(
+                    (actual.get("metadata") or {}).get("provider_options") or {}
+                )
+                for campo, valor in campos.items():
+                    if valor is None:
+                        opciones.pop(campo, None)
+                    else:
+                        opciones[campo] = _valor(valor)
+                instancia.update_llm_role_config(rol.lower(), provider_options=opciones)
+            hechos.append(rol.lower())
+
+    for clave, valor in cambios.items():
+        if clave not in GESTIONADAS:
+            continue
+        if valor is None:
+            os.environ.pop(clave, None)
+        else:
+            os.environ[clave] = valor_efectivo(valor)
+    return hechos
+
+
 def para_catalogo(proveedor: str, modelos: tuple[str, ...]) -> dict[str, Any]:
     """Los niveles de cada modelo, tal como los pinta la ventana."""
     salida: dict[str, Any] = {}
@@ -425,6 +479,7 @@ def niveles_de(proveedor: str, modelo: str) -> Optional[dict[str, Any]]:
 
 __all__ = [
     "BARRAS",
+    "aplicar_en_caliente",
     "DEFECTO",
     "GESTIONADAS",
     "MANUAL",

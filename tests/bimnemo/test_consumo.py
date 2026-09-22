@@ -347,3 +347,29 @@ def test_borrar_una_fila_la_quita_y_cambia_la_revision(registro):
     assert registro.resumen()["rows"] == []
     assert registro.revision > antes
     assert registro.borrar(fila["id"]) is False
+
+
+async def test_el_analisis_de_tablas_tambien_se_carga_a_su_archivo():
+    """La fase de tablas/imágenes gastaba sin archivo: salía «—» en la tabla."""
+    from lightrag.pipeline import _PipelineMixin
+
+    vistos = []
+
+    async def analizar(self, **kwargs):
+        vistos.append(consumo.DOCUMENTO.get())
+
+    original = _PipelineMixin.analyze_multimodal
+    try:
+        _PipelineMixin.analyze_multimodal = analizar
+        consumo.instalar_marcador()
+        await _PipelineMixin.analyze_multimodal(
+            object(),
+            doc_id="d",
+            file_path="C:/in/BE-16 expertos.docx",
+            parsed_data={},
+            pipeline_status={},
+            pipeline_status_lock=None,
+        )
+    finally:
+        _PipelineMixin.analyze_multimodal = original
+    assert vistos == ["BE-16 expertos.docx"]

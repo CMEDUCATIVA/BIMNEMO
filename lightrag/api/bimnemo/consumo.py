@@ -348,22 +348,39 @@ def instalar_marcador() -> None:
     """
     from lightrag.pipeline import _PipelineMixin
 
-    original = _PipelineMixin.process_single_document
-    if getattr(original, "_bimnemo_marcado", False):
-        return
-
-    @functools.wraps(original)
-    async def marcado(self, *args, **kwargs):
+    def ruta_proceso(kwargs: dict[str, Any]) -> str:
         estado = kwargs.get("status_doc")
-        ruta = str(getattr(estado, "file_path", "") or kwargs.get("doc_id") or "")
-        testigo = DOCUMENTO.set(Path(ruta).name if ruta else "")
-        try:
-            return await original(self, *args, **kwargs)
-        finally:
-            DOCUMENTO.reset(testigo)
+        return str(getattr(estado, "file_path", "") or kwargs.get("doc_id") or "")
 
-    marcado._bimnemo_marcado = True
-    _PipelineMixin.process_single_document = marcado
+    def ruta_analisis(kwargs: dict[str, Any]) -> str:
+        return str(kwargs.get("file_path") or kwargs.get("doc_id") or "")
+
+    # Dos fases gastan por un documento: el análisis de tablas, ecuaciones e
+    # imágenes (``analyze_multimodal``, en su propio trabajador) y la
+    # extracción y fusión (``process_single_document``). Sin la primera, lo
+    # que cuesta analizar las tablas de un Word salía sin archivo.
+    for nombre, ruta_de in (
+        ("process_single_document", ruta_proceso),
+        ("analyze_multimodal", ruta_analisis),
+    ):
+        original = getattr(_PipelineMixin, nombre)
+        if getattr(original, "_bimnemo_marcado", False):
+            continue
+
+        def envolver(original, ruta_de):
+            @functools.wraps(original)
+            async def marcado(self, *args, **kwargs):
+                ruta = ruta_de(kwargs)
+                testigo = DOCUMENTO.set(Path(ruta).name if ruta else "")
+                try:
+                    return await original(self, *args, **kwargs)
+                finally:
+                    DOCUMENTO.reset(testigo)
+
+            marcado._bimnemo_marcado = True
+            return marcado
+
+        setattr(_PipelineMixin, nombre, envolver(original, ruta_de))
 
 
 def iniciar(carpeta: Path) -> None:
