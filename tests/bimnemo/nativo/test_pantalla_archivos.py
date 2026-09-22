@@ -238,9 +238,18 @@ def test_reindexar_llama_al_endpoint_de_la_web(pantalla):
     assert ("POST", "/documents/scan") in pantalla.motor.pedidos
 
 
-def test_reintentar_llama_al_endpoint_de_la_web(pantalla):
-    pantalla._reintentar()
-    assert ("POST", "/bimnemo/documents/retry") in pantalla.motor.pedidos
+def test_reintentar_manda_solo_el_documento_de_la_fila(pantalla):
+    """El botón está en una fila: reintenta ese, no todos los fallidos."""
+    pantalla._reintentar("doc-3")
+    assert ("POST", "/bimnemo/documents/retry?doc_id=doc-3") in pantalla.motor.pedidos
+
+
+def test_el_boton_de_la_fila_lleva_su_propio_doc_id(pantalla):
+    from lightrag.api.bimnemo.nativo.pantalla_archivos import ACCIONES
+
+    reintentar = _botones(pantalla.tabla.cellWidget(2, ACCIONES))[0]
+    reintentar.click()
+    assert ("POST", "/bimnemo/documents/retry?doc_id=doc-3") in pantalla.motor.pedidos
 
 
 # --- Zona de arrastre ------------------------------------------------------

@@ -345,11 +345,15 @@ def create_bimnemo_documents_routes(
         "/documents/retry",
         response_model=ActionResponse,
         dependencies=[Depends(combined_auth)],
-        summary="Reintentar los documentos fallidos de una NEMO",
+        summary="Reintentar un documento fallido, o todos los de una NEMO",
     )
     async def retry_failed(
         nemo: Optional[str] = Query(
             default=None, description="NEMO a reintentar; por defecto, la activa"
+        ),
+        doc_id: Optional[str] = Query(
+            default=None,
+            description="Solo este documento; sin él, todos los fallidos de la NEMO",
         ),
         managed_tasks: set = Depends(get_managed_background_tasks),
     ) -> ActionResponse:
@@ -365,7 +369,23 @@ def create_bimnemo_documents_routes(
         ``apipeline_process_enqueue_documents`` ni siquiera acepta una lista —
         y saltarse el ingreso se llevaría por delante el vallado que protege
         de un borrado simultáneo.
+
+        Con ``doc_id`` se reintenta **solo ese documento**: es lo que pide el
+        botón de una fila (``bimnemo/reintento.py``).
         """
+        if doc_id:
+            from ..bimnemo.reintento import reintentar_uno
+
+            try:
+                return ActionResponse(
+                    **await reintentar_uno(await _rag_de(nemo), doc_id, managed_tasks)
+                )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.error("BIMNEMO: fallo al reintentar %s: %s", doc_id, exc)
+                raise internal_server_error(exc)
+
         from lightrag.exceptions import PipelineNotInitializedError
         from lightrag.kg.shared_storage import (
             ManualIntentRefused,

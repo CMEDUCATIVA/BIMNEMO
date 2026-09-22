@@ -610,15 +610,12 @@ class PantallaArchivos(Pantalla):
         caja.setSpacing(6)
         caja.addStretch(1)
 
-        if estado == "failed":
-            # El endpoint reencola TODOS los fallidos de la memoria, no este
-            # documento suelto. Se dice en el rótulo emergente en vez de
-            # fingir que la acción es solo de esta fila.
-            reintentar = self._boton_fila(
-                "recargar",
-                "Vuelve a encolar todos los documentos fallidos de esta memoria.",
-            )
-            reintentar.clicked.connect(self._reintentar)
+        doc_id = str(archivo.get("doc_id") or "")
+        if estado == "failed" and doc_id:
+            # Solo este documento: el botón está en su fila. Los demás
+            # fallidos se quedan como están.
+            reintentar = self._boton_fila("recargar", "Reintentar este documento")
+            reintentar.clicked.connect(lambda: self._reintentar(doc_id))
             caja.addWidget(reintentar)
 
         borrando = estado == "deleting"
@@ -778,18 +775,27 @@ class PantallaArchivos(Pantalla):
 
         self.motor.post("/documents/scan", {}, hecho, no_pudo)
 
-    def _reintentar(self) -> None:
-        self.aviso.informar("Reencolando los documentos fallidos…")
+    def _reintentar(self, doc_id: str) -> None:
+        self.aviso.informar("Reencolando el documento…")
 
         def hecho(datos: Any) -> None:
-            mensaje = ""
-            if isinstance(datos, dict):
-                mensaje = str(datos.get("message") or "")
-            self.aviso.acertar(mensaje or "Fallidos reencolados.")
+            datos = datos if isinstance(datos, dict) else {}
+            mensaje = str(datos.get("message") or "")
+            if datos.get("status") in ("busy", "nothing"):
+                # No es un fallo, pero tampoco se ha hecho nada: no se pinta
+                # en verde.
+                self.aviso.informar(mensaje)
+                return
+            self.aviso.acertar(mensaje or "El documento vuelve a la cola.")
             self._cadencia(CADENCIA_ACTIVA)
             self.refrescar()
 
-        self.motor.post("/bimnemo/documents/retry", {}, hecho, self._fallo)
+        self.motor.post(
+            f"/bimnemo/documents/retry?doc_id={quote(doc_id, safe='')}",
+            {},
+            hecho,
+            self._fallo,
+        )
 
     # -- borrar -------------------------------------------------------------
 
