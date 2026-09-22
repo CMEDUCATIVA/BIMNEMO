@@ -104,6 +104,8 @@ _ESTADOS: dict[str, tuple[str, str]] = {
     # Gris azulado: no es un error ni algo pendiente de arreglar, es una
     # parada que se pidió.
     "pausado": ("#94a3b8", "rgba(148, 163, 184, 0.14)"),
+    # Ámbar como «En cola»: va a pasar, solo que todavía no.
+    "espera": ("#f59e0b", "rgba(245, 158, 11, 0.12)"),
     "parsing": _OCUPADO,
     "analyzing": _OCUPADO,
     "processing": _OCUPADO,

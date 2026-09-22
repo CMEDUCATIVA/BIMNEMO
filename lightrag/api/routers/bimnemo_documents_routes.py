@@ -376,17 +376,37 @@ def create_bimnemo_documents_routes(
         botón de una fila (``bimnemo/reintento.py``).
         """
         if doc_id:
+            from ..bimnemo import espera
             from ..bimnemo.reintento import reintentar_uno
 
             try:
-                return ActionResponse(
-                    **await reintentar_uno(await _rag_de(nemo), doc_id, managed_tasks)
-                )
+                target_rag = await _rag_de(nemo)
+                resultado = await reintentar_uno(target_rag, doc_id, managed_tasks)
             except HTTPException:
                 raise
             except Exception as exc:
                 logger.error("BIMNEMO: fallo al reintentar %s: %s", doc_id, exc)
                 raise internal_server_error(exc)
+            if resultado["status"] != "busy":
+                return ActionResponse(**resultado)
+
+            # Con otro documento indexándose no se niega: se apunta y se hace
+            # en cuanto la memoria quede libre (bimnemo/espera.py).
+            registro = await target_rag.doc_status.get_by_id(doc_id) or {}
+            nombre = Path(str(registro.get("file_path") or doc_id)).name
+
+            async def intento() -> bool:
+                hecho = await reintentar_uno(target_rag, doc_id, managed_tasks)
+                return hecho["status"] != "busy"
+
+            espera.apuntar(managed_tasks, target_rag.workspace, nombre, intento)
+            return ActionResponse(
+                status="waiting",
+                message=(
+                    "En espera: se volverá a leer en cuanto termine lo que se "
+                    "está indexando."
+                ),
+            )
 
         from lightrag.exceptions import PipelineNotInitializedError
         from lightrag.kg.shared_storage import (

@@ -28,7 +28,7 @@ from typing import Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from lightrag.api.bimnemo import BIMNEMO_NAME, BIMNEMO_VERSION
+from lightrag.api.bimnemo import BIMNEMO_NAME, BIMNEMO_VERSION, espera
 from lightrag.api.bimnemo.catalog import categories_payload, known_extensions
 from lightrag.api.bimnemo.stats import (
     DEFAULT_GRAPH_COUNT_CAP,
@@ -339,6 +339,11 @@ def create_bimnemo_routes(
                 logger.warning("BIMNEMO: doc_status ilegible al listar: %s", exc)
 
             rows = merge_files_with_memory(snapshot, documents)
+            # Los que tienen una acción apuntada (reintentar, renombrar) que
+            # espera a que la memoria quede libre: la fila dice «En espera».
+            esperando = espera.en_espera(getattr(target_rag, "workspace", ""))
+            for fila in rows:
+                fila["waiting"] = fila.get("name") in esperando
         except HTTPException:
             raise
         except Exception as exc:

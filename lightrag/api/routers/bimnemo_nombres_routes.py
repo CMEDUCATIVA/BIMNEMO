@@ -17,7 +17,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from lightrag.api.bimnemo import nombres
+from lightrag.api.bimnemo import espera, nombres
 from lightrag.constants import PARSED_DIR_NAME
 from lightrag.utils import logger
 
@@ -180,45 +180,59 @@ def create_bimnemo_nombres_routes(
             )
             return RenameResponse(status="renaming", message=f"Renombrado a «{nuevo}».")
 
-        token = uuid4().hex
-        adquirido, _ = await _acquire_destructive_busy(
-            target_rag,
-            token,
-            kind="delete",
-            operation_record={"kind": "delete", "doc_ids": [doc_id]},
-        )
-        if not adquirido:
-            return RenameResponse(
-                status="busy",
-                message="La memoria está indexando. Renómbralo cuando termine.",
-            )
         gestor = DocumentManager(
             str(doc_manager.base_input_dir), getattr(target_rag, "workspace", "") or ""
         )
 
-        async def _con_registro(started):
-            started.set()
-            # El borrado suelta la reserva en su propio finally.
-            await background_delete_documents(
-                target_rag, gestor, [doc_id], False, False, token
+        async def lanzar() -> bool:
+            """Reserva, borra el registro fallido, renombra y encola. ``False`` si ocupada."""
+            token = uuid4().hex
+            adquirido, _ = await _acquire_destructive_busy(
+                target_rag,
+                token,
+                kind="delete",
+                operation_record={"kind": "delete", "doc_ids": [doc_id]},
             )
-            if await target_rag.doc_status.get_by_id(doc_id):
-                logger.error(
-                    "BIMNEMO: no se pudo borrar el registro de «%s»; no se renombra",
-                    viejo,
+            if not adquirido:
+                return False
+
+            async def _con_registro(started):
+                started.set()
+                # El borrado suelta la reserva en su propio finally.
+                await background_delete_documents(
+                    target_rag, gestor, [doc_id], False, False, token
                 )
-                return
-            await _renombrar_e_indexar()
+                if await target_rag.doc_status.get_by_id(doc_id):
+                    logger.error(
+                        "BIMNEMO: no se pudo borrar el registro de «%s»; no se "
+                        "renombra",
+                        viejo,
+                    )
+                    return
+                await _renombrar_e_indexar()
 
-        async def _respaldo():
-            await _release_destructive_busy(target_rag, token)
+            async def _respaldo():
+                await _release_destructive_busy(target_rag, token)
 
-        await start_reserved_background_task(
-            tareas, work=_con_registro, backstop_release=_respaldo
-        )
+            await start_reserved_background_task(
+                tareas, work=_con_registro, backstop_release=_respaldo
+            )
+            return True
+
+        if await lanzar():
+            return RenameResponse(
+                status="renaming",
+                message=f"Renombrando a «{nuevo}» y volviendo a indexarlo.",
+            )
+        # Con otro documento indexándose no se niega: se apunta y se hace en
+        # cuanto la memoria quede libre (bimnemo/espera.py).
+        espera.apuntar(tareas, target_rag.workspace, viejo, lanzar)
         return RenameResponse(
-            status="renaming",
-            message=f"Renombrando a «{nuevo}» y volviendo a indexarlo.",
+            status="waiting",
+            message=(
+                f"En espera: se renombrará a «{nuevo}» en cuanto termine lo que se "
+                "está indexando."
+            ),
         )
 
     return router

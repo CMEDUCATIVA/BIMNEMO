@@ -31,6 +31,9 @@ ESTADOS: dict[str, str] = {
     # Otro «fallido» que no lo es: lo paró quien usa BIMNEMO, con el botón de
     # pausa, y se reanuda con ⟳.
     "pausado": "En pausa",
+    # Tiene una acción apuntada (reintentar, renombrar) que se hará sola en
+    # cuanto termine lo que se está indexando.
+    "espera": "En espera",
     # No es un estado del motor: lo pone la pantalla mientras espera a que el
     # borrado termine, para que la fila no finja que no está pasando nada.
     "deleting": "Borrando…",

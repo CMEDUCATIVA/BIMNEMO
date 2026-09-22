@@ -493,6 +493,9 @@ class PantallaArchivos(Pantalla):
             return "subiendo"
         if nombre in self._borrandose:
             return "deleting"
+        if archivo.get("waiting"):
+            # Tiene una acción apuntada que espera a que la memoria se libere.
+            return "espera"
         if archivo.get("duplicate_of") is not None:
             return "duplicado"
         if archivo.get("paused") and archivo.get("status") == "failed":
@@ -639,7 +642,10 @@ class PantallaArchivos(Pantalla):
             pausar.clicked.connect(self._pausar)
             caja.addWidget(pausar)
         nombre_fila = str(archivo.get("name") or "")
-        if archivo.get("name_too_long") or (
+        if estado == "espera":
+            # Ya está apuntada: otro botón aquí solo la duplicaría.
+            pass
+        elif archivo.get("name_too_long") or (
             not archivo.get("status") and self.nombres.no_cabe(nombre_fila)
         ):
             # Se arregla renombrando, no reintentando: fallaría igual.
@@ -825,6 +831,11 @@ class PantallaArchivos(Pantalla):
         def hecho(datos: Any) -> None:
             datos = datos if isinstance(datos, dict) else {}
             mensaje = str(datos.get("message") or "")
+            if datos.get("status") == "waiting":
+                # Apuntado: la fila pasa a «En espera».
+                self.aviso.informar(mensaje)
+                self.refrescar()
+                return
             if datos.get("status") in ("busy", "nothing"):
                 # No es un fallo, pero tampoco se ha hecho nada: no se pinta
                 # en verde.
@@ -845,8 +856,9 @@ class PantallaArchivos(Pantalla):
         def hecho(datos: Any) -> None:
             datos = datos if isinstance(datos, dict) else {}
             mensaje = str(datos.get("message") or "Renombrado.")
-            if datos.get("status") == "busy":
+            if datos.get("status") == "waiting":
                 self.aviso.informar(mensaje)
+                self.refrescar()
                 return
             self.aviso.acertar(mensaje)
             self._cadencia(CADENCIA_ACTIVA)
