@@ -71,6 +71,10 @@ class Provider(NamedTuple):
     dims: tuple[int, ...] = ()  # dimensiones válidas (solo embeddings)
     host_hint: str = ""  # qué escribir cuando no hay host universal
     host_used: bool = True  # False = el binding ignora la dirección
+    # Variante «por suscripción» del mismo proveedor (hoy solo Claude). Cuando
+    # está presente, la vista ofrece elegir entre la clave de API y el login de
+    # Claude Code, y guarda un binding distinto según lo elegido.
+    subscription: "Provider | None" = None
 
 
 # --- Grupos -----------------------------------------------------------------
@@ -190,6 +194,30 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
             "binding propio. Sirve para chat y extracción; el pensamiento "
             "extendido y la caché de prompt no están expuestos por ahí. "
             "claude-haiku-4-5 es el barato para indexar."
+        ),
+        subscription=Provider(
+            key="claude_suscripcion",
+            label="Claude (suscripción)",
+            binding="claude_code",
+            group=DIRECT,
+            host="",
+            models=(
+                "claude-opus-5",
+                "claude-sonnet-5",
+                "claude-haiku-4-5",
+                "claude-opus-4-8",
+                "claude-sonnet-4-6",
+            ),
+            needs_key=False,
+            key_hint="No necesita clave: usa tu suscripción de Claude",
+            key_url="https://claude.com/login",
+            note=(
+                "Usa tu suscripción de Claude Pro/Max con el login de Claude "
+                "Code. Cada llamada ejecuta el binario de Claude Code, así que "
+                "es más lenta que la API; para indexar conviene un modelo "
+                "barato como claude-haiku-4-5."
+            ),
+            host_used=False,
         ),
     ),
     Provider(

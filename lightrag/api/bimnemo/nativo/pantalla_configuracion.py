@@ -101,11 +101,16 @@ SIN_MODELO = "— sin modelo —"
 class Seccion(QWidget):
     """El formulario de un proveedor: catálogo, modelo, dirección y clave."""
 
-    def __init__(self, clave: str, titulo: str, explicacion: str) -> None:
+    def __init__(
+        self, clave: str, titulo: str, explicacion: str, motor: Optional[Motor] = None
+    ) -> None:
         super().__init__()
         self.clave = clave
+        self.motor = motor
         self._catalogo: list[dict[str, Any]] = []
         self._tenia_clave = False
+        self._suscripcion: Optional[QWidget] = None
+        self.modo: Optional[QComboBox] = None
 
         columna = QVBoxLayout(self)
         columna.setContentsMargins(0, 0, 0, 0)
@@ -121,6 +126,16 @@ class Seccion(QWidget):
         self.proveedor.currentIndexChanged.connect(self._cambio_proveedor)
         self._fila("Proveedor", self.proveedor)
 
+        # Solo el modelo de lenguaje ofrece «por suscripción»: un segundo
+        # selector que aparece cuando el proveedor lo permite (hoy Claude).
+        if clave == "llm":
+            self.modo = QComboBox()
+            self.modo.addItem("Por API", "api")
+            self.modo.addItem("Por suscripción", "suscripcion")
+            self.modo.currentIndexChanged.connect(self._cambio_modo)
+            self._fila_modo = self._fila("Acceso", self.modo)
+            self._fila_modo.hide()
+
         self.modelo = QComboBox()
         # `activated` y no `currentIndexChanged`: solo lo que elige una
         # persona. Rehacer la lista también cambia el índice.
@@ -129,11 +144,11 @@ class Seccion(QWidget):
         self._fila("Modelo", self.modelo)
 
         self.host = QLineEdit()
-        self._fila("Dirección", self.host)
+        self._fila_host = self._fila("Dirección", self.host)
 
         self.api_key = QLineEdit()
         self.api_key.setEchoMode(QLineEdit.Password)
-        self._fila("Clave de API", self.api_key)
+        self._fila_clave = self._fila("Clave de API", self.api_key)
 
         # Solo el modelo de lenguaje razona. Los niveles dependen del modelo,
         # no del proveedor: se rehacen cada vez que cambia uno de los dos.
@@ -148,9 +163,15 @@ class Seccion(QWidget):
         self.pista.setWordWrap(True)
         self.tarjeta.anadir(self.pista)
 
+        # Panel de la suscripción de Claude: descargar, iniciar sesión y probar.
+        if clave == "llm":
+            self._suscripcion = self._panel_suscripcion()
+            self.tarjeta.anadir(self._suscripcion)
+            self._suscripcion.hide()
+
         columna.addWidget(self.tarjeta)
 
-    def _fila(self, nombre: str, control: QWidget) -> None:
+    def _fila(self, nombre: str, control: QWidget) -> QWidget:
         fila = QWidget()
         fila.setObjectName("fila")
         caja = QHBoxLayout(fila)
@@ -164,6 +185,7 @@ class Seccion(QWidget):
         caja.addWidget(control, 1)
 
         self.tarjeta.anadir(fila)
+        return fila
 
     # -- carga --------------------------------------------------------------
 
@@ -201,6 +223,14 @@ class Seccion(QWidget):
         if self.razonamiento is not None:
             self._razonamiento_guardado = dict(valores)
             self._poner_razonamiento(valores.get("reasoning") or {})
+
+        if self.modo is not None:
+            modo = valores.get("mode") or "api"
+            indice = self.modo.findData(modo)
+            self.modo.blockSignals(True)
+            self.modo.setCurrentIndex(indice if indice >= 0 else 0)
+            self.modo.blockSignals(False)
+        self._aplicar_modo()
 
     def _poner_razonamiento(self, elegidos: dict[str, str]) -> None:
         """Los niveles del modelo marcado y, encima, lo que había elegido.
@@ -241,6 +271,7 @@ class Seccion(QWidget):
         # Con otro modelo, lo que decida el modelo: un nivel de otro proveedor
         # podría no existir en este, y un ajuste a mano tampoco le serviría.
         self._poner_razonamiento({})
+        self._aplicar_modo()
 
     def _poner_modelos(
         self, proveedor: Optional[dict[str, Any]], elegir: Optional[str] = None
@@ -310,10 +341,198 @@ class Seccion(QWidget):
         self.pista.setText("  ·  ".join(partes))
         self.api_key.setEnabled(bool(elegido.get("needs_key", True)))
 
+    # -- suscripción de Claude ----------------------------------------------
+
+    def _es_suscripcion(self) -> bool:
+        return self.modo is not None and self.modo.currentData() == "suscripcion"
+
+    def _aplicar_modo(self) -> None:
+        """Muestra u oculta el selector de acceso y los controles de suscripción.
+
+        El selector «Acceso» solo existe para proveedores con variante de
+        suscripción (hoy Claude). En «por suscripción» la dirección y la clave
+        se esconden porque no se usan: la credencial es el login OAuth de
+        Claude Code, no una clave de API ni un endpoint.
+        """
+        if self.modo is None:
+            return
+        elegido = self._elegido() or {}
+        tiene_suscripcion = bool(elegido.get("subscription"))
+        self._fila_modo.setVisible(tiene_suscripcion)
+        suscripcion = tiene_suscripcion and self._es_suscripcion()
+        self._fila_host.setVisible(not suscripcion)
+        self._fila_clave.setVisible(not suscripcion)
+        if self._suscripcion is not None:
+            self._suscripcion.setVisible(suscripcion)
+        if suscripcion:
+            self.host.clear()
+            self.api_key.clear()
+            self._pintar_estado_suscripcion()
+
+    def _cambio_modo(self) -> None:
+        self._aplicar_modo()
+
+    def _panel_suscripcion(self) -> QWidget:
+        panel = QWidget()
+        panel.setObjectName("suscripcion")
+        columna = QVBoxLayout(panel)
+        columna.setContentsMargins(0, 6, 0, 0)
+        columna.setSpacing(8)
+
+        self.suscripcion_estado = QLabel(
+            "Descarga el binario de Claude Code y después inicia sesión."
+        )
+        self.suscripcion_estado.setObjectName("descripcion")
+        self.suscripcion_estado.setWordWrap(True)
+        columna.addWidget(self.suscripcion_estado)
+
+        fila = QWidget()
+        fila.setObjectName("fila")
+        caja = QHBoxLayout(fila)
+        caja.setContentsMargins(0, 0, 0, 0)
+        caja.setSpacing(8)
+        self.boton_descargar = QPushButton("Descargar binario")
+        self.boton_descargar.setCursor(Qt.PointingHandCursor)
+        self.boton_descargar.clicked.connect(self._descargar)
+        caja.addWidget(self.boton_descargar)
+        self.boton_login = QPushButton("Iniciar sesión")
+        self.boton_login.setCursor(Qt.PointingHandCursor)
+        self.boton_login.clicked.connect(self._iniciar_sesion)
+        caja.addWidget(self.boton_login)
+        caja.addStretch(1)
+        columna.addWidget(fila)
+
+        fila_prueba = QWidget()
+        fila_prueba.setObjectName("fila")
+        caja_prueba = QHBoxLayout(fila_prueba)
+        caja_prueba.setContentsMargins(0, 0, 0, 0)
+        caja_prueba.setSpacing(8)
+        self.boton_probar = QPushButton("Probar conexión")
+        self.boton_probar.setCursor(Qt.PointingHandCursor)
+        self.boton_probar.clicked.connect(self._probar)
+        caja_prueba.addWidget(self.boton_probar)
+        self.resultado_test = QLabel("")
+        self.resultado_test.setObjectName("resultado-test")
+        caja_prueba.addWidget(self.resultado_test, 1)
+        columna.addWidget(fila_prueba)
+
+        return panel
+
+    def _suscripcion_ocupado(self, ocupado: bool) -> None:
+        self.boton_descargar.setEnabled(not ocupado)
+        self.boton_login.setEnabled(not ocupado)
+        self.boton_probar.setEnabled(not ocupado)
+
+    def _pintar_estado_suscripcion(self) -> None:
+        if self.motor is None or not self._es_suscripcion():
+            return
+        self.motor.get(
+            "/bimnemo/claude-subscription/status",
+            self._estado_suscripcion,
+            self._suscripcion_fallo,
+        )
+
+    def _estado_suscripcion(self, datos: Any) -> None:
+        if not isinstance(datos, dict):
+            return
+        if datos.get("logged_in"):
+            self.suscripcion_estado.setText(
+                "Sesión de Claude iniciada. Guarda y reinicia para usar tu "
+                "suscripción."
+            )
+        else:
+            self.suscripcion_estado.setText(
+                "Aún no hay sesión. Descarga el binario y después inicia sesión."
+            )
+
+    def _descargar(self) -> None:
+        if self.motor is None:
+            return
+        self._suscripcion_ocupado(True)
+        self.suscripcion_estado.setText("Descargando el binario de Claude Code…")
+        self.motor.post(
+            "/bimnemo/claude-subscription/download",
+            {},
+            self._descargado,
+            self._suscripcion_fallo,
+        )
+
+    def _descargado(self, datos: Any) -> None:
+        self._suscripcion_ocupado(False)
+        if isinstance(datos, dict) and datos.get("ok"):
+            self.suscripcion_estado.setText("Binario instalado. Ahora inicia sesión.")
+        else:
+            self._suscripcion_fallo(
+                (datos or {}).get("message")
+                if isinstance(datos, dict)
+                else "No se pudo descargar."
+            )
+        self._pintar_estado_suscripcion()
+
+    def _iniciar_sesion(self) -> None:
+        if self.motor is None:
+            return
+        self._suscripcion_ocupado(True)
+        self.suscripcion_estado.setText(
+            "Abre tu navegador y termina el inicio de sesión…"
+        )
+        self.motor.post(
+            "/bimnemo/claude-subscription/login",
+            {},
+            self._sesion_iniciada,
+            self._suscripcion_fallo,
+        )
+
+    def _sesion_iniciada(self, datos: Any) -> None:
+        self._suscripcion_ocupado(False)
+        if isinstance(datos, dict) and datos.get("ok"):
+            self.suscripcion_estado.setText(
+                "Sesión de Claude iniciada. Guarda y reinicia para usar tu "
+                "suscripción."
+            )
+        else:
+            self._suscripcion_fallo(
+                (datos or {}).get("message")
+                if isinstance(datos, dict)
+                else "No se pudo iniciar sesión."
+            )
+        self._pintar_estado_suscripcion()
+
+    def _probar(self) -> None:
+        if self.motor is None:
+            return
+        self._suscripcion_ocupado(True)
+        self.resultado_test.setText("Probando…")
+        self.resultado_test.setStyleSheet("")
+        self.motor.post(
+            "/bimnemo/claude-subscription/probe",
+            {},
+            self._probado,
+            self._suscripcion_fallo,
+        )
+
+    def _probado(self, datos: Any) -> None:
+        self._suscripcion_ocupado(False)
+        bien = isinstance(datos, dict) and bool(datos.get("ok"))
+        if bien:
+            self.resultado_test.setText("● Conectado")
+            self.resultado_test.setStyleSheet("color: #16a34a; font-weight: 700;")
+        else:
+            self.resultado_test.setText("● Sin conexión")
+            self.resultado_test.setStyleSheet("color: #dc2626; font-weight: 700;")
+
+    def _suscripcion_fallo(self, motivo: str) -> None:
+        self._suscripcion_ocupado(False)
+        self.suscripcion_estado.setText(motivo or "Error al conectar con la suscripción.")
+        self.resultado_test.setText("● Sin conexión")
+        self.resultado_test.setStyleSheet("color: #dc2626; font-weight: 700;")
+
     # -- guardado -----------------------------------------------------------
 
     def falta_clave(self) -> bool:
         """¿Pide clave este proveedor y no hay ninguna, ni escrita ni guardada?"""
+        if self._es_suscripcion():
+            return False
         return (
             self.api_key.isEnabled()
             and not self.api_key.text().strip()
@@ -328,6 +547,8 @@ class Seccion(QWidget):
             "model": self.modelo_actual(),
             "host": self.host.text().strip(),
         }
+        if self.modo is not None:
+            datos["mode"] = self.modo.currentData() or "api"
         escrita = self.api_key.text().strip()
         if escrita:
             datos["api_key"] = escrita
@@ -486,7 +707,7 @@ class PantallaConfiguracion(Pantalla):
 
         self.secciones: dict[str, Seccion] = {}
         for clave, titulo, explicacion in SECCIONES:
-            self.secciones[clave] = Seccion(clave, titulo, explicacion)
+            self.secciones[clave] = Seccion(clave, titulo, explicacion, motor)
 
         # Se avisa al elegir, no solo al guardar: es cuando se decide.
         # `activated` y no `currentIndexChanged`, para que solo salte con lo

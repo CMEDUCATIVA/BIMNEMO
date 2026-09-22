@@ -29,7 +29,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from lightrag.api.bimnemo import embedding_anterior, razonamiento
+from lightrag.api.bimnemo import embedding_anterior, razonamiento, suscripcion_claude
 from lightrag.api.bimnemo.envfile import (
     UNCHANGED,
     clave_puesta,
@@ -114,6 +114,14 @@ class SectionSettings(BaseModel):
             "Sin este campo no se toca nada."
         ),
     )
+    mode: Optional[str] = Field(
+        default=None,
+        description=(
+            "Solo LLM y solo para proveedores con variante de suscripción "
+            "(hoy Claude). 'suscripcion' guarda el binding claude_code en vez "
+            "del binding del catálogo y no escribe host ni clave de API."
+        ),
+    )
 
 
 class AccessRequest(BaseModel):
@@ -178,18 +186,25 @@ class SaveSettingsRequest(BaseModel):
 
             updates[f"{prefix}_BINDING"] = provider.binding
 
+            # La suscripción de Claude cambia el binding y deja fuera host y
+            # clave: el login OAuth de Claude Code es la credencial, no una
+            # API key ni un endpoint.
+            suscripcion = kind == "llm" and section.mode == "suscripcion"
+            if suscripcion:
+                updates[f"{prefix}_BINDING"] = "claude_code"
+
             # Un host vacío se deja SIN escribir en lugar de escribirse vacío:
             # varios bindings (gemini, bedrock, voyageai) resuelven su propio
             # endpoint, y una cadena vacía los rompería.
             host = (section.host or "").strip()
-            if host:
+            if host and not suscripcion:
                 updates[f"{prefix}_BINDING_HOST"] = host
 
             model = (section.model or "").strip()
             if model:
                 updates[f"{prefix}_MODEL"] = model
 
-            if section.api_key != UNCHANGED:
+            if section.api_key != UNCHANGED and not suscripcion:
                 updates[f"{prefix}_BINDING_API_KEY"] = section.api_key.strip()
 
             if kind == "embedding" and section.dim:
@@ -466,6 +481,44 @@ def create_bimnemo_settings_routes(
             ),
         )
 
+    # -- Suscripción de Claude (Claude Code) ---------------------------------
+
+    @router.get(
+        "/claude-subscription/status",
+        dependencies=[Depends(combined_auth)],
+        summary="¿Hay una sesión de Claude Code iniciada?",
+    )
+    async def claude_subscription_status() -> dict[str, Any]:
+        """Devuelve si el login OAuth de Claude Code está activo y desde dónde."""
+        return await asyncio.to_thread(suscripcion_claude.estado)
+
+    @router.post(
+        "/claude-subscription/login",
+        dependencies=[Depends(combined_auth)],
+        summary="Abrir el login OAuth de Claude Code",
+    )
+    async def claude_subscription_login() -> dict[str, Any]:
+        """Arranca el login oficial y espera a que el usuario lo termine."""
+        return await asyncio.to_thread(suscripcion_claude.iniciar_sesion)
+
+    @router.post(
+        "/claude-subscription/probe",
+        dependencies=[Depends(combined_auth)],
+        summary="Probar que la suscripción responde con una petición real",
+    )
+    async def claude_subscription_probe() -> dict[str, Any]:
+        """Hace una petición real sin herramientas para comprobar la suscripción."""
+        return await asyncio.to_thread(suscripcion_claude.probar)
+
+    @router.post(
+        "/claude-subscription/download",
+        dependencies=[Depends(combined_auth)],
+        summary="Instalar el binario de Claude Code",
+    )
+    async def claude_subscription_download() -> dict[str, Any]:
+        """Descarga e instala el binario con el instalador oficial de Anthropic."""
+        return await asyncio.to_thread(suscripcion_claude.descargar)
+
     @router.post(
         "/restart",
         response_model=RestartResponse,
@@ -552,6 +605,7 @@ def _section_view(values: dict[str, str], kind: str) -> dict[str, Any]:
     view: dict[str, Any] = {
         "binding": binding,
         "provider": match_provider(kind, binding, host) if binding else "",
+        "mode": "suscripcion" if (kind == "llm" and binding == "claude_code") else "api",
         "host": host,
         "model": values.get(f"{prefix}_MODEL", ""),
         "api_key_set": clave_puesta(values.get(f"{prefix}_BINDING_API_KEY", "")),

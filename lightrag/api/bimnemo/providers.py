@@ -47,6 +47,7 @@ VALID_BINDINGS: dict[str, frozenset[str]] = {
             "azure_openai",
             "bedrock",
             "gemini",
+            "claude_code",
         }
     ),
     "embedding": frozenset(
@@ -108,6 +109,11 @@ def match_provider(kind: Kind, binding: str, host: str) -> str:
     """
     normalized = (host or "").rstrip("/").lower()
 
+    # La suscripción de Claude usa el binding ``claude_code``; la vista lo
+    # presenta como el proveedor «anthropic» en modo suscripción.
+    if binding == "claude_code":
+        return "anthropic"
+
     # 1. Coincidencia exacta de binding + host.
     for provider in _BY_KIND[kind]:
         if (
@@ -162,6 +168,11 @@ def catalog_payload() -> dict[str, Any]:
             "dims": list(provider.dims),
             "host_hint": provider.host_hint,
             "host_used": provider.host_used,
+            "subscription": (
+                serialize(provider.subscription, kind)
+                if provider.subscription is not None
+                else None
+            ),
         }
 
     return {

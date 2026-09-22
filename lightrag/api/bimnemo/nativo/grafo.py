@@ -49,6 +49,12 @@ GRAVITY = 0.015  # Atracción hacia el centro, para que no se escape.
 DAMPING = 0.82  # Rozamiento; sin él el grafo oscila y no se asienta.
 ALPHA_DECAY = 0.984
 ALPHA_MIN = 0.008
+#: En «Cerebro», cuándo pasa de ordenar a llenar la silueta: con la
+#: simulación ya casi asentada, para que el orden que se lleva sea el bueno.
+CEREBRO_LLENAR = 0.1
+#: Lo que tira cada nodo de su sitio en el cerebro. Un muelle y no un salto:
+#: se ve cómo el grafo se abre hasta llenar la silueta.
+CEREBRO_ANCLA = 0.05
 MAX_STEP = 40.0  # Tope de desplazamiento por paso, contra explosiones.
 
 # Force Atlas reparte distinto: la repulsión crece con el número de relaciones
@@ -213,6 +219,8 @@ class Grafo(QWidget):
         self._encima: Optional[int] = None
         self._elegido: Optional[int] = None
         self._arrastrando: Optional[int] = None
+        # El sitio de cada nodo dentro del cerebro, cuando ya se ha llenado.
+        self._anclas: Optional[np.ndarray] = None
         self._paneando: Optional[QPointF] = None
 
         self._reloj = QTimer(self)
@@ -282,6 +290,7 @@ class Grafo(QWidget):
         if not self._nodos:
             self._reloj.stop()
             return
+        self._anclas = None
         if disposicion.aplicar(self._disposicion, self._nodos, self._pos):
             self._vel[:] = 0.0
             self._alpha = 0.0
@@ -318,6 +327,14 @@ class Grafo(QWidget):
                 self._encuadre_pendiente = False
                 self.encuadrar(por_el_usuario=False)
             return
+
+        if self._disposicion == "cerebro":
+            if self._anclas is not None:
+                self._paso_anclado()
+                return
+            if self._alpha < CEREBRO_LLENAR:
+                self._llenar_cerebro()
+                return
 
         pos = self._pos
         fuerza = np.zeros_like(pos)
@@ -363,10 +380,9 @@ class Grafo(QWidget):
         # Gravedad hacia el centro.
         fuerza -= pos * GRAVITY
 
-        # Y, si toca, el contorno devolviendo dentro a los que se salen.
-        if self._disposicion == "cerebro":
-            fuerza += silueta.contener(pos, silueta.escala_para(len(pos)))
+        self._mover(fuerza)
 
+    def _mover(self, fuerza: np.ndarray) -> None:
         self._vel = (self._vel + fuerza) * DAMPING
         paso = self._vel * self._alpha
         # Tope por eje: sin esto, un nodo aislado con mucha repulsión sale
@@ -377,9 +393,33 @@ class Grafo(QWidget):
             paso[self._arrastrando] = 0.0
             self._vel[self._arrastrando] = 0.0
 
-        self._pos = pos + paso
+        self._pos = self._pos + paso
         self._alpha *= ALPHA_DECAY
         self.update()
+
+    # -- cerebro ------------------------------------------------------------
+
+    def _llenar_cerebro(self) -> None:
+        """Segundo tiempo del cerebro: del orden de las fuerzas, a la silueta.
+
+        Las fuerzas ya han decidido quién va junto a quién; ahora cada nodo
+        se lleva a su sitio equivalente dentro del cerebro (silueta.llenar) y
+        la simulación se recalienta para que se vea cómo se abre.
+        """
+        escala = silueta.escala_para(len(self._pos))
+        self._anclas = silueta.llenar(self._pos, escala)
+        self._alpha = 1.0
+        if not self._vista_tocada:
+            self.encuadrar(por_el_usuario=False)
+
+    def _paso_anclado(self) -> None:
+        """Con el cerebro lleno: cada nodo, atado a su sitio.
+
+        Sin muelles de las relaciones ni gravedad —ya decidieron el orden y
+        volverían a hacer la bola—, solo el tirón hacia su sitio. Es lo que
+        deja que el temblor de las sinapsis mueva los nodos y vuelvan.
+        """
+        self._mover((self._anclas - self._pos) * CEREBRO_ANCLA)
 
     # -- sinapsis -----------------------------------------------------------
 
@@ -483,6 +523,12 @@ class Grafo(QWidget):
             return
         minimos = self._pos.min(axis=0)
         maximos = self._pos.max(axis=0)
+        if self._disposicion == "cerebro":
+            # El cerebro entero a la vista, no solo donde hay nodos: la
+            # silueta es lo que da sentido a dónde están.
+            bajo, alto_ = silueta.caja(silueta.escala_para(len(self._pos)))
+            minimos = np.minimum(minimos, bajo)
+            maximos = np.maximum(maximos, alto_)
         ancho = max(float(maximos[0] - minimos[0]), 1.0)
         alto = max(float(maximos[1] - minimos[1]), 1.0)
 
@@ -885,6 +931,9 @@ class Grafo(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, _evento: QMouseEvent) -> None:  # noqa: N802
+        if self._arrastrando is not None and self._anclas is not None:
+            # Donde lo suelta, se queda: si no, volvería a su sitio de antes.
+            self._anclas[self._arrastrando] = self._pos[self._arrastrando]
         self._arrastrando = None
         self._paneando = None
         self.setCursor(Qt.OpenHandCursor)

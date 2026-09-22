@@ -2070,6 +2070,10 @@ def create_app(args):
                 )
             elif binding == "gemini":
                 return create_optimized_gemini_llm_func(config_cache, args, llm_timeout)
+            elif binding == "claude_code":
+                from lightrag.llm.claude_code import claude_code_complete
+
+                return claude_code_complete
             else:  # openai and compatible
                 # Use optimized function with pre-processed configuration
                 return create_optimized_openai_llm_func(config_cache, args, llm_timeout)

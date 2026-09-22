@@ -530,6 +530,7 @@ def parse_args() -> argparse.Namespace:
             "azure_openai",
             "bedrock",
             "gemini",
+            "claude_code",
         ],
         help="LLM binding type (default: from env or ollama)",
     )

@@ -1,23 +1,25 @@
-"""La silueta de cerebro que contiene el grafo.
+"""La silueta de cerebro que llena el grafo.
 
 ## Qué es y qué no es
 
-**No coloca los nodos.** Las fuerzas siguen mandando: los nodos se agrupan
-por sus relaciones, los concentradores siguen tirando de sus vecinos y el
-grafo se asienta como siempre. Lo único que hace la silueta es **contener**:
-al nodo que se sale del contorno se le empuja dentro.
+**No decide quién va junto a quién.** Eso lo siguen decidiendo las fuerzas:
+primero el grafo se asienta como en «Fuerzas» y los nodos se agrupan por sus
+relaciones. Después, esa disposición se lleva al cerebro entero conservando
+el orden (:func:`llenar`): lo que estaba junto sigue junto, lo de la
+izquierda sigue a la izquierda.
 
-Esa distinción es todo. Colocar los nodos en forma de cerebro sería
-decoración: la figura no diría nada de la memoria y el grafo dejaría de
-informar para quedar bonito. Conteniendo, la información se conserva entera
-y la silueta es el recipiente, no el resultado.
+Antes la silueta solo **contenía**: empujaba dentro al que se salía. Con un
+grafo denso —casi todas las memorias lo son— las fuerzas lo dejan hecho una
+bola, y el cerebro se quedaba vacío alrededor de un montón en el centro con
+los rótulos pisándose. Llenándolo, la información se conserva y la forma se
+ve entera.
 
 ## Cómo está hecha la forma
 
 Una **unión de elipses**, no un contorno dibujado a mano punto por punto.
 Dos motivos, y los dos importan:
 
-- La prueba «¿está este punto dentro?» se hace 191 veces por fotograma. Con
+- La prueba «¿está este punto dentro?» se hace para cada nodo. Con
   elipses es una cuenta de dos multiplicaciones que numpy resuelve de golpe
   para todos los nodos a la vez; con un polígono habría que lanzar rayos.
 - Cuando un nodo se sale hay que saber **hacia dónde** devolverlo. Con una
@@ -30,6 +32,8 @@ from __future__ import annotations
 import math
 
 import numpy as np
+
+from lightrag.api.bimnemo.nativo.disposicion import SEPARACION_ANILLO
 
 #: Las piezas del cerebro, en coordenadas normalizadas: centro y radios.
 #:
@@ -45,59 +49,90 @@ PIEZAS: tuple[tuple[float, float, float, float], ...] = (
     (0.16, 0.60, 0.13, 0.30),  # tronco, bajando
 )
 
-#: Cuánto tira el contorno del nodo que se ha salido.
-#:
-#: Es un muelle, no una pared: devuelve al nodo en unas décimas de segundo
-#: sin que rebote. Con un valor alto el grafo tiembla en el borde; con uno
-#: bajo, la silueta no llega a leerse — con 0,10 se quedaban cuarenta de
-#: ciento noventa y uno fuera del contorno.
-CONTENCION = 0.22
-
-
 def escala_para(cuantos: int) -> float:
     """Cómo de grande tiene que ser el cerebro para tantos nodos.
 
-    Crece con la raíz del número, igual que crece el área que ocupa un
-    montón de puntos repartidos. Fijarlo daría un cerebro que aprieta con
-    doscientas entidades y queda vacío con veinte.
+    **Del tamaño del círculo** de la disposición circular: el mismo radio
+    para los mismos nodos. Antes crecía con la raíz del número y con
+    doscientas cincuenta entidades el cerebro medía la sexta parte que el
+    círculo: todo se amontonaba en el centro y los rótulos se pisaban.
     """
-    return max(120.0, 26.0 * math.sqrt(max(cuantos, 1)))
+    return max(140.0, SEPARACION_ANILLO * max(cuantos, 1) / (2 * math.pi))
 
 
-def contener(pos: np.ndarray, escala: float) -> np.ndarray:
-    """La fuerza que devuelve dentro a los nodos que se han salido.
+def caja(escala: float) -> tuple[np.ndarray, np.ndarray]:
+    """Las esquinas del rectángulo que contiene el cerebro."""
+    piezas = np.array(PIEZAS)
+    bajo = (piezas[:, :2] - piezas[:, 2:]).min(axis=0) * escala
+    alto = (piezas[:, :2] + piezas[:, 2:]).max(axis=0) * escala
+    return bajo, alto
 
-    Devuelve un vector por nodo: cero para los que están dentro, y para los
-    de fuera el empuje hacia el punto del borde que les queda en línea
-    recta desde el centro de su pieza más cercana.
-    """
-    if not len(pos):
-        return np.zeros_like(pos)
 
-    centros = np.array([[cx, cy] for cx, cy, _rx, _ry in PIEZAS]) * escala
-    radios = np.array([[rx, ry] for _cx, _cy, rx, ry in PIEZAS]) * escala
-
-    # `q` vale 1 justo en el borde de cada elipse, menos dentro y más fuera.
-    delta = pos[:, None, :] - centros[None, :, :]
+def _dentro(puntos: np.ndarray) -> np.ndarray:
+    """¿Qué puntos (en coordenadas normalizadas) caen dentro del cerebro?"""
+    centros = np.array([[cx, cy] for cx, cy, _rx, _ry in PIEZAS])
+    radios = np.array([[rx, ry] for _cx, _cy, rx, ry in PIEZAS])
+    delta = puntos[:, None, :] - centros[None, :, :]
     q = np.sum((delta / radios[None, :, :]) ** 2, axis=2)
-
-    # La pieza más cercana en esa medida es la que devuelve al nodo: así
-    # entra por donde se salió y no cruza el cerebro de lado a lado.
-    cual = np.argmin(q, axis=1)
-    mejor = q[np.arange(len(pos)), cual]
-
-    fuera = mejor > 1.0
-    fuerza = np.zeros_like(pos)
-    if not fuera.any():
-        return fuerza
-
-    indices = np.where(fuera)[0]
-    d = delta[indices, cual[indices], :]
-    # El punto del borde en la misma dirección: dividir por la raíz de `q`
-    # es exactamente eso, porque `q` es cuadrático en la distancia.
-    destino = centros[cual[indices]] + d / np.sqrt(mejor[indices])[:, None]
-    fuerza[indices] = (destino - pos[indices]) * CONTENCION
-    return fuerza
+    return np.min(q, axis=1) <= 1.0
 
 
-__all__ = ["CONTENCION", "PIEZAS", "contener", "escala_para"]
+def _puntos_dentro(cuantos: int) -> np.ndarray:
+    """``cuantos`` puntos repartidos parejo por el cerebro, en normalizadas.
+
+    Espiral áurea —pareja y sin alinear— de la que se quedan los que caen
+    dentro. Determinista: el mismo grafo sale siempre igual.
+    """
+    elegidos = np.zeros((0, 2))
+    muestras = cuantos * 2
+    while len(elegidos) < cuantos:
+        i = np.arange(muestras) + 0.5
+        radio = np.sqrt(i / muestras) * 1.05
+        angulo = i * 2.399963
+        puntos = np.stack([np.cos(angulo) * radio, np.sin(angulo) * radio], axis=1)
+        puntos[:, 1] = puntos[:, 1] * 0.9 - 0.05
+        elegidos = puntos[_dentro(puntos)]
+        muestras *= 2
+    # Repartidos por toda la espiral y no los primeros, que están en el centro.
+    cuales = np.linspace(0, len(elegidos) - 1, cuantos).astype(int)
+    return elegidos[cuales]
+
+
+def llenar(pos: np.ndarray, escala: float) -> np.ndarray:
+    """A dónde va cada nodo para llenar el cerebro **sin perder su sitio**.
+
+    Las fuerzas dejan un grafo denso hecho una bola, y agrandar el
+    contorno no lo cambia: los muelles vuelven a juntarlo en medio. Así que
+    la bola se lleva al cerebro entero conservando el orden: el que estaba
+    más a la izquierda sigue a la izquierda, el de arriba sigue arriba, y
+    los que estaban juntos —que es lo que dicen las relaciones— siguen
+    juntos.
+
+    Se hace por columnas: los nodos, ordenados de izquierda a derecha, se
+    parten en columnas iguales, y lo mismo los puntos del cerebro; dentro
+    de cada columna se emparejan de arriba abajo.
+    """
+    cuantos = len(pos)
+    if not cuantos:
+        return np.zeros((0, 2))
+    destinos = _puntos_dentro(cuantos)
+    bajo, alto = caja(1.0)
+    ancho, largo = alto - bajo
+    columnas = max(1, round(math.sqrt(cuantos * ancho / largo)))
+
+    resultado = np.zeros_like(pos, dtype=float)
+    nodos_x = np.array_split(np.argsort(pos[:, 0], kind="stable"), columnas)
+    puntos_x = np.array_split(np.argsort(destinos[:, 0], kind="stable"), columnas)
+    for nodos, puntos in zip(nodos_x, puntos_x):
+        nodos = nodos[np.argsort(pos[nodos, 1], kind="stable")]
+        puntos = puntos[np.argsort(destinos[puntos, 1], kind="stable")]
+        resultado[nodos] = destinos[puntos]
+    return resultado * escala
+
+
+__all__ = [
+    "PIEZAS",
+    "caja",
+    "escala_para",
+    "llenar",
+]
