@@ -532,3 +532,19 @@ def test_el_aviso_cuenta_en_vivo_y_no_deja_seguir_si_no_cabe(aplicacion):
     fila.campo.setText("BE-16 expertos")
     assert dialogo.boton_seguir.isEnabled()
     assert dialogo.resultado() == {LARGO_16: "BE-16 expertos.docx"}
+
+def test_la_fila_elegida_se_lee_tambien_sin_foco(pantalla):
+    """Al hacer clic fuera, Qt usaba el resaltado inactivo del sistema (casi
+    blanco en Windows) y la fila con texto blanco dejaba de leerse."""
+    from PySide6.QtGui import QPalette
+
+    from lightrag.api.bimnemo.nativo import tema
+
+    pantalla.window().setStyleSheet(tema.hoja(tema.OSCURO))
+    paleta = pantalla.tabla.palette()
+    activa = paleta.color(QPalette.Active, QPalette.Highlight)
+    inactiva = paleta.color(QPalette.Inactive, QPalette.Highlight)
+    assert inactiva == activa
+    assert paleta.color(QPalette.Inactive, QPalette.HighlightedText).name() == (
+        tema.OSCURO.texto
+    )

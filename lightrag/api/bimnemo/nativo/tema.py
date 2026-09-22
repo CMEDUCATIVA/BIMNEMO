@@ -726,6 +726,10 @@ def hoja(p: Paleta) -> str:
         background: transparent;
         border: none;
         gridline-color: transparent;
+        /* Fija el resaltado para TODOS los estados (activo e inactivo): es lo
+           que Qt pinta debajo de la fila elegida. */
+        selection-background-color: {p.azul_suave};
+        selection-color: {p.texto};
     }}
     /* Poco relleno vertical a propósito: Qt se lo **descuenta** al widget
        que va dentro de una celda. Con 8 px arriba y abajo, el botón de
@@ -736,6 +740,14 @@ def hoja(p: Paleta) -> str:
         padding: 2px 6px;
     }}
     QTableWidget#tabla::item:selected {{
+        background: {p.azul_suave};
+        color: {p.texto};
+    }}
+    /* La misma selección con la ventana o la tabla sin foco. Sin esto Qt
+       pinta debajo el «resaltado inactivo» del sistema —en Windows, un azul
+       muy claro— y el azul translúcido de encima se queda en casi blanco con
+       el texto blanco: la fila elegida dejaba de leerse al hacer clic fuera. */
+    QTableWidget#tabla::item:selected:!active {{
         background: {p.azul_suave};
         color: {p.texto};
     }}
