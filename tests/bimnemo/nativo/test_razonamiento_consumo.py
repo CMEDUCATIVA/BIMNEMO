@@ -177,3 +177,44 @@ def test_formatos_en_castellano():
     assert miles(1234567) == "1.234.567"
     assert dinero(0.1386) == "$0,1386"
     assert dinero(1234.5) == "$1.234,50"
+
+
+def test_avisa_si_el_motor_no_usa_lo_guardado(aplicacion):
+    """El caso real: se guardó flash, no se reinició, y se indexó con pro."""
+    from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
+
+    datos = dict(USO, restart_required=True, saved_model="deepseek-flash",
+                 running_model="deepseek-v4-pro")
+    tarjeta = TarjetaConsumo(_Motor(datos))
+    assert not tarjeta.pendiente.isHidden()
+    assert "deepseek-v4-pro" in tarjeta.pendiente.text()
+
+    tarjeta.pintar(dict(datos, restart_required=False))  # misma revisión
+    assert tarjeta.pendiente.isHidden()
+
+
+def test_guardar_reinicia_el_motor_aunque_no_cambie_nada_si_habia_algo_pendiente(
+    aplicacion, monkeypatch
+):
+    from lightrag.api.bimnemo.nativo.pantalla_configuracion import PantallaConfiguracion
+
+    pantalla = PantallaConfiguracion(_Motor({}))
+    reinicios = []
+    monkeypatch.setattr(pantalla, "_reiniciar", lambda: reinicios.append(1))
+
+    pantalla._pendiente = True
+    pantalla._guardado({"restart_required": False})
+    assert reinicios == [1]
+
+    pantalla._pendiente = False
+    pantalla._guardado({"restart_required": False})
+    assert reinicios == [1]
+
+
+def test_si_esta_indexando_dice_que_lo_guardado_no_se_usa(aplicacion):
+    from lightrag.api.bimnemo.nativo.pantalla_configuracion import PantallaConfiguracion
+
+    pantalla = PantallaConfiguracion(_Motor({}))
+    pantalla._tras_guardar = True
+    pantalla._reiniciado(False, "409 ocupado")
+    assert "NO se usa" in pantalla.estado.text()

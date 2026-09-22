@@ -92,6 +92,14 @@ LENGUAJE: dict[str, Precio] = {
     "llama-3.3-70b-versatile": Precio(0.59, 0.79),
     "openai/gpt-oss-20b": Precio(0.075, 0.30),
     "openai/gpt-oss-120b": Precio(0.15, 0.60),
+    # Mistral (los alias -latest, a la versión vigente de cada uno)
+    "mistral-small-latest": Precio(0.15, 0.60),
+    "mistral-medium-latest": Precio(1.50, 7.50),
+    "mistral-large-latest": Precio(0.50, 1.50),
+    "ministral-8b-latest": Precio(0.15, 0.15),
+    # Moonshot
+    "kimi-k2.6": Precio(0.95, 4.00),
+    "kimi-k3": Precio(3.00, 15.00),
     # Azure (Global Standard)
     "gpt-4o-mini": Precio(0.15, 0.60),
     "gpt-4.1-mini": Precio(0.40, 1.60),

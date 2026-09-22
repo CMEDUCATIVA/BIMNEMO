@@ -82,3 +82,23 @@ def test_lo_que_no_se_reconoce_se_ensena_como_lo_dijo_el_proveedor():
     """Mejor lo que dijo el proveedor que un motivo inventado."""
     raw = "Error code: 400 - {'error': {'message': 'Algo raro que nadie conoce'}}"
     assert _explica(raw) == "Algo raro que nadie conoce"
+
+
+ANCLA = (
+    "Refusing to purge document doc-58125d13ad7e8d50523a1bcc9c95d1f3: recovery "
+    "anchor row(s) missing or unusable (full_entities, full_relations) and the "
+    "document may already have written to the knowledge graph "
+    "(kg_write_state=graph_mutation_started). Purging now would delete its "
+    "chunks while leaving unattributable graph objects behind."
+)
+
+
+def test_un_documento_a_medias_en_el_grafo_se_explica_en_castellano():
+    """El de la ley atascada: no manda a «Reintentar», que volvería a negarse."""
+    from lightrag.api.bimnemo.stats import MAX_REASON, _clean_reason
+
+    dice = _clean_reason(ANCLA)
+    assert dice.startswith("Este documento se quedó a medias en el grafo")
+    assert "no ha borrado nada" in dice
+    assert "Refusing" not in dice
+    assert len(dice) <= MAX_REASON

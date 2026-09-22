@@ -282,16 +282,20 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
         binding="openai",
         group=COMPATIBLE,
         host="https://api.groq.com/openai/v1",
+        # llama-3.1-8b-instant, qwen3-32b y kimi-k2 los retiró Groq en 2026;
+        # su sustituto oficial es gpt-oss.
         models=(
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
             "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "qwen/qwen3-32b",
-            "moonshotai/kimi-k2-instruct",
         ),
         needs_key=True,
         key_hint="console.groq.com/keys",
         key_url="https://console.groq.com/keys",
-        note="El más rápido del mercado; acorta mucho la indexación.",
+        note=(
+            "El más rápido del mercado; acorta mucho la indexación. gpt-oss "
+            "siempre razona: bájalo a «Bajo» en la barra."
+        ),
     ),
     Provider(
         key="openrouter",
@@ -318,11 +322,14 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
         binding="openai",
         group=COMPATIBLE,
         host="https://api.mistral.ai/v1",
+        # Las versiones con fecha que había aquí (2508, 2506, 2411, 2410) las
+        # retiró Mistral en 2025-2026. Los alias `-latest` apuntan siempre a
+        # la vigente y no caducan.
         models=(
-            "mistral-medium-2508",
-            "mistral-small-2506",
-            "mistral-large-2411",
-            "ministral-8b-2410",
+            "mistral-small-latest",
+            "mistral-medium-latest",
+            "mistral-large-latest",
+            "ministral-8b-latest",
         ),
         needs_key=True,
         key_hint="console.mistral.ai/api-keys",
@@ -334,9 +341,9 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
         binding="openai",
         group=COMPATIBLE,
         host="https://api.together.xyz/v1",
+        # Qwen2.5-72B-Instruct-Turbo ya no está en el catálogo sin servidor.
         models=(
             "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-            "Qwen/Qwen2.5-72B-Instruct-Turbo",
             "deepseek-ai/DeepSeek-V3",
         ),
         needs_key=True,
@@ -389,7 +396,8 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
         binding="openai",
         group=COMPATIBLE,
         host="https://api.moonshot.cn/v1",
-        models=("kimi-k2-0905-preview", "moonshot-v1-128k", "moonshot-v1-32k"),
+        # La serie K2 y moonshot-v1 se retiraron en 2026.
+        models=("kimi-k2.6", "kimi-k3"),
         needs_key=True,
         key_hint="platform.moonshot.cn/console/api-keys",
         key_url="https://platform.moonshot.cn/console/api-keys",

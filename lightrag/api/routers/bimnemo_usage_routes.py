@@ -7,6 +7,7 @@ Aparte del resto de rutas de BIMNEMO porque responde a otra pregunta: no
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -31,6 +32,19 @@ class UsageResponse(BaseModel):
     revision: int = Field(
         description="Cambia con cada llamada contada; sirve para saber si repintar"
     )
+    restart_required: bool = Field(
+        default=False,
+        description=(
+            "Hay configuración guardada que el motor todavía no usa: lo que se "
+            "gaste ahora se gasta con lo de antes"
+        ),
+    )
+    running_model: str = Field(
+        default="", description="Modelo de lenguaje con el que corre el motor"
+    )
+    saved_model: str = Field(
+        default="", description="Modelo de lenguaje guardado en la configuración"
+    )
 
 
 def create_bimnemo_usage_routes(api_key: Optional[str] = None) -> APIRouter:
@@ -51,8 +65,22 @@ def create_bimnemo_usage_routes(api_key: Optional[str] = None) -> APIRouter:
 
         El coste es un techo: no descuenta la entrada que el proveedor sirve
         desde su caché, porque el contador no recibe ese dato.
+
+        Dice también si lo guardado no es lo que usa el motor. Existe por un
+        caso real: se guardó `deepseek-flash`, no se reinició, y la tabla
+        enseñaba `deepseek-v4-pro` sin que nada explicara por qué.
         """
-        return UsageResponse(**consumo.REGISTRO.resumen(days))
+        from lightrag.api.bimnemo.envfile import read_env
+
+        from .bimnemo_settings_routes import _env_path, _settings_differ_from_running
+
+        guardado = read_env(_env_path())
+        return UsageResponse(
+            **consumo.REGISTRO.resumen(days),
+            restart_required=_settings_differ_from_running(guardado),
+            running_model=os.getenv("LLM_MODEL", ""),
+            saved_model=guardado.get("LLM_MODEL", ""),
+        )
 
     return router
 

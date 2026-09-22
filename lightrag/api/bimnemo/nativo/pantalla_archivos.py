@@ -485,6 +485,8 @@ class PantallaArchivos(Pantalla):
             return "deleting"
         if archivo.get("duplicate_of") is not None:
             return "duplicado"
+        if archivo.get("paused") and archivo.get("status") == "failed":
+            return "pausado"
         return str(archivo.get("status") or "")
 
     @staticmethod
@@ -494,7 +496,7 @@ class PantallaArchivos(Pantalla):
         El motivo ya viajaba en cada fila y no se enseñaba en ningún sitio:
         la tabla decía «Fallido» y había que ir a buscar el porqué al Panel.
         """
-        if estado in ("failed", "duplicado"):
+        if estado in ("failed", "duplicado", "pausado"):
             return str(archivo.get("error_msg") or "")
         return ""
 
@@ -616,10 +618,24 @@ class PantallaArchivos(Pantalla):
         caja.addStretch(1)
 
         doc_id = str(archivo.get("doc_id") or "")
-        if estado == "failed" and doc_id:
+        if estado in formato.PAUSABLES:
+            # LightRAG para la tubería de la memoria entera, no un documento
+            # suelto: se dice en el rótulo en vez de fingir lo contrario.
+            pausar = self._boton_fila(
+                "pausa",
+                "Pausar la indexación de esta memoria. Se reanuda con ⟳ sin "
+                "volver a pagar lo ya extraído (con el mismo modelo).",
+            )
+            pausar.clicked.connect(self._pausar)
+            caja.addWidget(pausar)
+        if estado in ("failed", "pausado") and doc_id:
             # Solo este documento: el botón está en su fila. Los demás
             # fallidos se quedan como están.
-            reintentar = self._boton_fila("recargar", "Reintentar este documento")
+            reintentar = self._boton_fila(
+                "recargar",
+                "Reanudar este documento" if estado == "pausado"
+                else "Reintentar este documento",
+            )
             reintentar.clicked.connect(lambda: self._reintentar(doc_id))
             caja.addWidget(reintentar)
 
@@ -801,6 +817,16 @@ class PantallaArchivos(Pantalla):
             hecho,
             self._fallo,
         )
+
+    def _pausar(self) -> None:
+        self.aviso.informar("Pausando la indexación…")
+
+        def hecho(datos: Any) -> None:
+            datos = datos if isinstance(datos, dict) else {}
+            self.aviso.informar(str(datos.get("message") or "Pausando."))
+            self._cadencia(CADENCIA_ACTIVA)
+
+        self.motor.post("/bimnemo/documents/pause", {}, hecho, self._fallo)
 
     # -- borrar -------------------------------------------------------------
 

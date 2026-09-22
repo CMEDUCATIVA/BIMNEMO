@@ -422,3 +422,23 @@ def test_un_fallo_de_verdad_dice_su_motivo_al_pasar_el_raton(pantalla):
     celda = pantalla.tabla.cellWidget(fila, ESTADO)
     assert "Fallido" in _texto(celda)
     assert "El modelo no respondió" in celda.toolTip()
+
+
+# -- pausa ------------------------------------------------------------------
+
+
+def test_lo_que_se_indexa_se_puede_pausar_y_lo_pausado_reanudar(aplicacion):
+    from lightrag.api.bimnemo.nativo import formato
+
+    assert "processing" in formato.PAUSABLES and "deleting" not in formato.PAUSABLES
+    assert formato.estado("pausado") == "En pausa"
+
+
+def test_pausar_llama_a_la_ruta_de_la_memoria(pantalla):
+    pantalla._pausar()
+    assert ("POST", "/bimnemo/documents/pause") in pantalla.motor.pedidos
+
+
+def test_un_documento_pausado_no_sale_como_fallido(pantalla):
+    archivo = {"name": "ley.pdf", "status": "failed", "paused": True, "doc_id": "d"}
+    assert pantalla._estado_de(archivo, "ley.pdf") == "pausado"

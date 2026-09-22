@@ -476,6 +476,10 @@ class PantallaConfiguracion(Pantalla):
         self._hay_vectores = False
         # Ya dijo «Continuar» a este cambio: no se le vuelve a preguntar.
         self._cambio_aceptado = False
+        # El reinicio en curso lo lanzó «Guardar», no el botón de reiniciar.
+        self._tras_guardar = False
+        # Hay configuración guardada que el motor todavía no usa.
+        self._pendiente = False
 
         self.aviso = Aviso()
         self.anadir(self.aviso)
@@ -608,7 +612,8 @@ class PantallaConfiguracion(Pantalla):
         self._hay_vectores = bool(datos.get("has_vectors"))
         self._cambio_aceptado = False
 
-        if datos.get("restart_required"):
+        self._pendiente = bool(datos.get("restart_required"))
+        if self._pendiente:
             self.estado.informar(
                 "Hay configuración guardada que el motor todavía no usa. "
                 "Reinicia para aplicarla."
@@ -702,10 +707,26 @@ class PantallaConfiguracion(Pantalla):
         self.estado.informar("Guardando…")
         self.motor.post("/bimnemo/settings", cuerpo, self._guardado, self._no_guardo)
 
-    def _guardado(self, _datos: Any) -> None:
+    def _guardado(self, datos: Any) -> None:
+        """Guardado: y ahora aplicarlo, que es lo que se quería.
+
+        Antes solo se decía «reinicia el motor» en una línea pequeña, y el
+        usuario guardó `deepseek-flash`, no reinició, y el motor indexó un
+        documento entero con `deepseek-v4-pro`. Guardar sin aplicar no le
+        sirve a nadie: se reinicia aquí mismo. Si el motor está indexando se
+        negará (409), y `_reiniciado` explica qué hacer.
+        """
         self.boton_guardar.setEnabled(True)
-        self.estado.acertar("Guardado. Reinicia el motor para que empiece a usarlo.")
-        self.refrescar()
+        # Sin cambios no basta para no reiniciar: puede haber algo guardado
+        # antes y todavía sin aplicar, que es justo cuando más falta hace.
+        cambio = not isinstance(datos, dict) or datos.get("restart_required", True)
+        if not cambio and not self._pendiente:
+            self.estado.acertar("No había nada que cambiar.")
+            self.refrescar()
+            return
+        self.estado.informar("Guardado. Reiniciando el motor para aplicarlo…")
+        self._tras_guardar = True
+        self._reiniciar()
 
     def _no_guardo(self, motivo: str) -> None:
         self.boton_guardar.setEnabled(True)
@@ -731,8 +752,18 @@ class PantallaConfiguracion(Pantalla):
     def _reiniciado(self, bien: bool, motivo: str) -> None:
         self.barra.hide()
         self.boton_reiniciar.setEnabled(True)
+        tras_guardar, self._tras_guardar = self._tras_guardar, False
         if bien:
             self.estado.acertar("El motor ha vuelto con la configuración nueva.")
+            self.refrescar()
+        elif tras_guardar:
+            # Lo corriente: está indexando y no se corta a mitad. Lo guardado
+            # está a salvo, pero NO se está usando: hay que decirlo claro.
+            self.estado.fallar(
+                "Guardado, pero todavía NO se usa: el motor está indexando y "
+                "sigue con el modelo anterior. Pausa la indexación en Archivos "
+                "o espera a que termine, y pulsa «Reiniciar motor»."
+            )
             self.refrescar()
         else:
             self.estado.fallar(motivo)

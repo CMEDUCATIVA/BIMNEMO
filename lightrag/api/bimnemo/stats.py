@@ -268,6 +268,7 @@ async def summarize_memory(rag: Any) -> dict[str, Any]:
     total_text_chars = 0
     failed_reason: Optional[str] = None
     copia_repetida: Optional[str] = None
+    en_pausa: Optional[str] = None
 
     for record in documents.values():
         status_value = getattr(record.status, "value", str(record.status))
@@ -288,18 +289,24 @@ async def summarize_memory(rag: Any) -> dict[str, Any]:
             # enseña si no hay ningún fallo de verdad que decir antes.
             if copia_repetida is None:
                 copia_repetida = explicar_copia(_nombre_de(record), original)
+        elif pausado(error):
+            # Tampoco lo es una pausa: la pidió el usuario.
+            if en_pausa is None:
+                en_pausa = _clean_reason(error)
         elif failed_reason is None:
             failed_reason = _clean_reason(error)
 
+    aviso = copia_repetida or en_pausa
     return {
         "total_documents": len(documents),
         "by_status": by_status,
         "total_chunks": total_chunks,
         "total_text_chars": total_text_chars,
         "documents_error": None,
-        "failed_reason": failed_reason or copia_repetida,
-        # Para que la ventana lo pinte como aviso y no como error.
-        "failed_kind": "error" if failed_reason else ("duplicate" if copia_repetida else None),
+        "failed_reason": failed_reason or aviso,
+        # Para que la ventana lo pinte como aviso y no como error. «duplicate»
+        # es el tipo que la ventana ya pinta en tono de aviso.
+        "failed_kind": "error" if failed_reason else ("duplicate" if aviso else None),
     }
 
 
@@ -481,6 +488,43 @@ _PROVEEDOR_EN_CASTELLANO: tuple[tuple[tuple[str, ...], str], ...] = (
     ),
 )
 
+#: Cómo empieza el motivo que LightRAG guarda al cancelar a petición de alguien
+#: (``pipeline._cancellation_label``). Una cancelación por error interno
+#: empieza distinto —«Cancelled by internal error»— y no es una pausa.
+_PAUSA = "user cancelled"
+
+
+def pausado(error_msg: Any) -> bool:
+    """¿Este fallo es una pausa pedida desde la pantalla, y no un error?"""
+    return str(error_msg or "").strip().lower().startswith(_PAUSA)
+
+
+#: Los fallos del propio motor que llegan a la pantalla, también en castellano.
+#:
+#: Van aparte de los del proveedor porque la culpa y el remedio son otros: no
+#: hay saldo que añadir ni clave que revisar.
+#:
+#: ``RecoveryAnchorMissingError`` (``lightrag/exceptions.py``): el documento
+#: llegó a escribir en el grafo pero falta el registro de qué escribió. LightRAG
+#: se niega a purgarlo para no dejar entidades huérfanas, y lo garantiza: **no
+#: borra nada**. Reintentar o borrar vuelven a negarse hasta reparar la memoria
+#: (``lightrag.tools.kg_integrity_repair --apply``); decirle «reintenta» sería
+#: mandarle a pulsar un botón que no puede funcionar.
+_MOTOR_EN_CASTELLANO: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        (_PAUSA,),
+        "En pausa: la detuviste tú. Pulsa ⟳ en la fila para seguir; lo ya "
+        "extraído no se vuelve a pagar mientras no cambies de modelo.",
+    ),
+    (
+        ("refusing to purge document", "recoveryanchormissingerror"),
+        "Este documento se quedó a medias en el grafo y le falta el registro de "
+        "qué entidades escribió. Para no dejar datos sueltos, el motor no lo "
+        "limpia ni lo vuelve a leer, y no ha borrado nada. «Reintentar» y "
+        "«Borrar» no funcionarán con él hasta reparar la memoria.",
+    ),
+)
+
 #: A partir de cuántos caracteres una ruta de Windows da problemas. El límite
 #: clásico es 260; se avisa un poco antes porque el lector de documentos
 #: todavía añade nombres de fichero por debajo de la ruta que sale en el error.
@@ -528,6 +572,9 @@ def en_castellano(raw: Any) -> Optional[str]:
     minusculas = texto.lower()
     if _ruta_demasiado_larga(texto, minusculas):
         return _RUTA_DEMASIADO_LARGA
+    for claves, frase in _MOTOR_EN_CASTELLANO:
+        if any(clave in minusculas for clave in claves):
+            return frase[:MAX_REASON]
     for claves, plantilla in _PROVEEDOR_EN_CASTELLANO:
         if not any(clave in minusculas for clave in claves):
             continue
@@ -686,6 +733,7 @@ def merge_files_with_memory(
                     "updated_at": None,
                     "error_msg": None,
                     "duplicate_of": None,
+                    "paused": False,
                 }
             )
         else:
@@ -706,6 +754,9 @@ def merge_files_with_memory(
                     ),
                     # El original, si es una copia repetida; `None` si no.
                     "duplicate_of": original,
+                    # Parado desde la pantalla: se enseña «En pausa», no
+                    # «Fallido».
+                    "paused": pausado(error),
                 }
             )
         rows.append(payload)

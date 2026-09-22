@@ -32,6 +32,8 @@ from lightrag.base import DocStatus
 from lightrag.utils import logger
 
 from ..utils_api import get_combined_auth_dependency, internal_server_error
+from lightrag.kg.shared_storage import append_pipeline_history
+
 from .document_routes import get_managed_background_tasks
 
 #: Estados que significan «todavía hay trabajo por delante».
@@ -471,6 +473,67 @@ def create_bimnemo_documents_routes(
             message=(
                 f"{len(fallidos)} documento(s) vuelven a la cola. Si la memoria "
                 "está indexando, entrarán en cuanto termine."
+            ),
+        )
+
+    # -- Pausa -------------------------------------------------------------
+
+    @router.post(
+        "/documents/pause",
+        response_model=ActionResponse,
+        dependencies=[Depends(combined_auth)],
+        summary="Pausar la indexación de una NEMO",
+    )
+    async def pause_indexing(
+        nemo: Optional[str] = Query(
+            default=None, description="NEMO a pausar; por defecto, la activa"
+        ),
+    ) -> ActionResponse:
+        """Detiene la indexación **de esta memoria**; se reanuda con Reintentar.
+
+        Hace lo mismo que ``/documents/cancel_pipeline`` —levantar
+        ``cancellation_requested`` y dejar que la tubería pare en su
+        siguiente punto seguro—, pero en el ``pipeline_status`` de la NEMO
+        pedida: la oficial solo mira la memoria por defecto, y con varias no
+        había forma de parar las demás.
+
+        Lo que estaba en curso queda FAILED con «User cancelled…», que la
+        pantalla enseña como «En pausa». Reanudar no vuelve a pagar lo ya
+        extraído mientras no se cambie de modelo: la caché de extracción
+        guarda cada fragmento.
+        """
+        from lightrag.exceptions import PipelineNotInitializedError
+        from lightrag.kg.shared_storage import get_namespace_data, get_namespace_lock
+
+        target_rag = await _rag_de(nemo)
+        try:
+            estado = await get_namespace_data(
+                "pipeline_status", workspace=target_rag.workspace
+            )
+        except PipelineNotInitializedError:
+            estado = None
+        if estado is None:
+            return ActionResponse(
+                status="not_busy", message="Esta memoria no está indexando nada."
+            )
+
+        bloqueo = get_namespace_lock("pipeline_status", workspace=target_rag.workspace)
+        async with bloqueo:
+            if not estado.get("busy", False):
+                return ActionResponse(
+                    status="not_busy", message="Esta memoria no está indexando nada."
+                )
+            aviso = "Pipeline cancellation requested by user"
+            estado.update({"cancellation_requested": True, "latest_message": aviso})
+            append_pipeline_history(estado, aviso)
+
+        logger.info("BIMNEMO: pausa pedida en la memoria %r", target_rag.workspace)
+        return ActionResponse(
+            status="pausing",
+            message=(
+                "Pausando: termina el fragmento en curso y se detiene. Pulsa ⟳ "
+                "en la fila para seguir; lo ya extraído no se vuelve a pagar si "
+                "no cambias de modelo."
             ),
         )
 

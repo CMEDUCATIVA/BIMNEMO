@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from lightrag.api.bimnemo.nativo.motor import Motor
-from lightrag.api.bimnemo.nativo.piezas import Tarjeta
+from lightrag.api.bimnemo.nativo.piezas import Aviso, Tarjeta
 
 SONDEO_MS = 3_000
 
@@ -81,6 +81,9 @@ class TarjetaConsumo(Tarjeta):
         super().__init__("Uso y coste de la IA")
         self.motor = motor
         self._revision: Optional[int] = None
+
+        self.pendiente = Aviso()
+        self.anadir(self.pendiente)
 
         self.totales = QLabel("…")
         self.totales.setObjectName("dato-valor")
@@ -161,6 +164,9 @@ class TarjetaConsumo(Tarjeta):
     def pintar(self, datos: Any) -> None:
         if not isinstance(datos, dict):
             return
+        # Antes de mirar la revisión: el aviso importa aunque todavía no se
+        # haya gastado nada con lo de antes.
+        self._pintar_pendiente(datos)
         revision = datos.get("revision")
         if revision is not None and revision == self._revision:
             return
@@ -173,6 +179,25 @@ class TarjetaConsumo(Tarjeta):
             "techo: no descuenta la entrada que el proveedor cobra más barata "
             "por tenerla en caché. Precios comprobados el "
             f"{datos.get('prices_checked') or '?'}; los locales cuentan 0."
+        )
+
+    def _pintar_pendiente(self, datos: dict[str, Any]) -> None:
+        """Lo guardado no es lo que usa el motor: dicho en rojo, con los nombres."""
+        if not datos.get("restart_required"):
+            self.pendiente.callar()
+            return
+        guardado = datos.get("saved_model") or "otro modelo"
+        en_uso = datos.get("running_model") or "el anterior"
+        if guardado != en_uso:
+            texto = (
+                f"Guardaste «{guardado}», pero el motor sigue usando «{en_uso}»: "
+                "lo que se indexe ahora se paga con ese. "
+            )
+        else:
+            texto = "Hay configuración guardada que el motor todavía no usa. "
+        self.pendiente.fallar(
+            texto + "Ve a Configuración IA y pulsa «Reiniciar motor» (si está "
+            "indexando, pausa primero)."
         )
 
     def _pintar_totales(self, totales: dict[str, Any]) -> None:

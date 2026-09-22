@@ -57,6 +57,7 @@ NOMBRES = {
     "acercar": "plus-lg",
     "encajar": "arrows-fullscreen",
     "recargar": "arrow-clockwise",
+    "pausa": "pause-fill",
     "buscar": "search",
     "borrar": "trash3",
     "editar": "pencil",

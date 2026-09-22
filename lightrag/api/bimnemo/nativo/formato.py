@@ -28,6 +28,9 @@ ESTADOS: dict[str, str] = {
     # Tampoco es un estado del motor: es un «fallido» que en realidad es una
     # copia de otro archivo que ya está en la memoria. No falta nada.
     "duplicado": "Copia repetida",
+    # Otro «fallido» que no lo es: lo paró quien usa BIMNEMO, con el botón de
+    # pausa, y se reanuda con ⟳.
+    "pausado": "En pausa",
     # No es un estado del motor: lo pone la pantalla mientras espera a que el
     # borrado termine, para que la fila no finja que no está pasando nada.
     "deleting": "Borrando…",
@@ -36,6 +39,10 @@ ESTADOS: dict[str, str] = {
 #: Estados en los que el motor todavía tiene trabajo con ese documento. Es lo
 #: que decide si se sigue sondeando y si la fila lleva barra de avance.
 EN_CURSO = ("pending", "parsing", "analyzing", "processing", "deleting")
+
+#: Los que el botón de pausa puede parar: todo lo que la tubería tiene entre
+#: manos. Un borrado no, que no es una indexación.
+PAUSABLES = ("pending", "parsing", "analyzing", "processing")
 
 
 def estado(bruto: Any) -> str:
@@ -90,4 +97,4 @@ def fecha(segundos: Any) -> str:
         return "—"
 
 
-__all__ = ["EN_CURSO", "ESTADOS", "estado", "fecha", "numero", "tamano"]
+__all__ = ["EN_CURSO", "ESTADOS", "PAUSABLES", "estado", "fecha", "numero", "tamano"]
