@@ -310,7 +310,10 @@ class PantallaConfiguracion(Pantalla):
         # El embedding con el que arrancó la pantalla y si ya hay vectores
         # hechos con él: cambiarlo entonces deja el motor sin arrancar.
         self._embedding_guardado: tuple[str, str] = ("", "")
+        self._embedding_valores: dict[str, Any] = {}
         self._hay_vectores = False
+        # Ya dijo «Continuar» a este cambio: no se le vuelve a preguntar.
+        self._cambio_aceptado = False
 
         self.aviso = Aviso()
         self.anadir(self.aviso)
@@ -318,6 +321,13 @@ class PantallaConfiguracion(Pantalla):
         self.secciones: dict[str, Seccion] = {}
         for clave, titulo, explicacion in SECCIONES:
             self.secciones[clave] = Seccion(clave, titulo, explicacion)
+
+        # Se avisa al elegir, no solo al guardar: es cuando se decide.
+        # `activated` y no `currentIndexChanged`, para que solo salte con lo
+        # que elige una persona y no al cargar los valores guardados.
+        embedding = self.secciones["embedding"]
+        embedding.proveedor.activated.connect(self._embedding_elegido)
+        embedding.modelo.activated.connect(self._embedding_elegido)
 
         # De dos en dos, como en la web. La de acciones sí va entera, debajo:
         # afecta a todas.
@@ -432,7 +442,9 @@ class PantallaConfiguracion(Pantalla):
             str(embedding.get("binding") or ""),
             str(embedding.get("model") or ""),
         )
+        self._embedding_valores = dict(embedding)
         self._hay_vectores = bool(datos.get("has_vectors"))
+        self._cambio_aceptado = False
 
         if datos.get("restart_required"):
             self.estado.informar(
@@ -471,31 +483,52 @@ class PantallaConfiguracion(Pantalla):
             return None
         return modelo, nuevo["model"] or nuevo["provider"]
 
-    def _confirmar_cambio_de_embedding(self) -> bool:
-        """Avisa antes de guardar un embedding que no casa con las memorias.
+    def preguntar(self, titulo: str, texto: str) -> bool:
+        """«Continuar» o «No continuar». Devuelve si eligió continuar."""
+        caja = QMessageBox(self)
+        caja.setIcon(QMessageBox.Warning)
+        caja.setWindowTitle(titulo)
+        caja.setText(texto)
+        seguir = caja.addButton("Continuar", QMessageBox.AcceptRole)
+        parar = caja.addButton("No continuar", QMessageBox.RejectRole)
+        caja.setDefaultButton(parar)
+        caja.exec()
+        return caja.clickedButton() is seguir
 
-        Guardarlo no rompe nada todavía; lo rompe el reinicio: el motor no
-        arranca con vectores de otro modelo. Mejor decirlo aquí, cuando aún
-        se puede no hacerlo, que en un error al abrir.
+    def _confirmar_cambio_de_embedding(self) -> bool:
+        """Avisa de que el embedding elegido no casa con las memorias.
+
+        Cambiarlo no rompe nada todavía; lo rompe el reinicio: el motor no
+        arranca con vectores de otro modelo. Mejor decirlo cuando aún se
+        puede no hacerlo que en un error al abrir.
         """
         cambio = self.cambio_de_embedding()
         if cambio is None:
+            self._cambio_aceptado = False
+            return True
+        if self._cambio_aceptado:
             return True
         actual, nuevo = cambio
-        respuesta = QMessageBox.question(
-            self,
+        self._cambio_aceptado = self.preguntar(
             "Cambiar el modelo de embeddings",
-            f"Tus memorias están hechas con «{actual}». Los vectores de un "
-            f"modelo no sirven para otro: con «{nuevo}», al reiniciar el "
+            f"Tus memorias ya tienen grafos hechos con «{actual}». Los vectores "
+            f"de un modelo no sirven para otro: con «{nuevo}», al reiniciar el "
             "motor no podrá abrirlas.\n\n"
             "Para usarlo habría que reconstruir los índices, lo que vuelve a "
             "enviar todo el texto al proveedor nuevo (gasta saldo). Si BIMNEMO "
             f"no arranca, te ofrecerá volver a «{actual}».\n\n"
-            "¿Guardar igualmente?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            "¿Quieres continuar?",
         )
-        return respuesta == QMessageBox.Yes
+        return self._cambio_aceptado
+
+    def _embedding_elegido(self, _indice: int = 0) -> None:
+        """Al elegir otro proveedor o modelo: avisar, y si no sigue, deshacer."""
+        if self._confirmar_cambio_de_embedding():
+            return
+        self.secciones["embedding"].poner_valores(self._embedding_valores)
+        self.estado.informar(
+            f"Se mantiene «{self._embedding_guardado[1]}» para los embeddings."
+        )
 
     def _guardar(self) -> None:
         if not self._confirmar_cambio_de_embedding():

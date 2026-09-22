@@ -228,36 +228,66 @@ def _elegir_gemini(configuracion):
     proveedor.setCurrentIndex(proveedor.findData("gemini"))
 
 
-def test_cambiar_el_embedding_con_memorias_pide_confirmacion(configuracion, ventana, monkeypatch):
-    """Guardarlo y reiniciar dejaba BIMNEMO sin abrir, sin decir por qué."""
-    from lightrag.api.bimnemo.nativo import pantalla_configuracion as modulo
-
-    enviado, preguntas = [], []
-    ventana.motor.post = lambda *a, **k: enviado.append(a)
+def _respuestas(configuracion, monkeypatch, *contestaciones):
+    preguntas = []
+    pendientes = list(contestaciones)
     monkeypatch.setattr(
-        modulo.QMessageBox, "question",
-        lambda *a, **k: (preguntas.append(a[2]), modulo.QMessageBox.No)[1],
+        configuracion, "preguntar",
+        lambda titulo, texto: (preguntas.append(texto), pendientes.pop(0))[1],
     )
+    return preguntas
+
+
+def _elegir_gemini_a_mano(configuracion):
+    """Como una persona: cambia el índice y emite `activated`."""
+    proveedor = configuracion.secciones["embedding"].proveedor
+    indice = proveedor.findData("gemini")
+    proveedor.setCurrentIndex(indice)
+    proveedor.activated.emit(indice)
+
+
+def test_elegir_otro_proveedor_avisa_en_el_momento(configuracion, monkeypatch):
+    """Con grafos hechos, el aviso sale al elegir, no al guardar."""
+    preguntas = _respuestas(configuracion, monkeypatch, False)
     _con_memorias_de_openai(configuracion)
-    _elegir_gemini(configuracion)
-    configuracion._guardar()
+    _elegir_gemini_a_mano(configuracion)
 
     assert "«text-embedding-3-large»" in preguntas[0]
     assert "«gemini-embedding-001»" in preguntas[0]
-    assert enviado == []  # dijo que no: no se guarda nada
 
 
-def test_si_confirma_se_guarda(configuracion, ventana, monkeypatch):
-    from lightrag.api.bimnemo.nativo import pantalla_configuracion as modulo
+def test_no_continuar_deja_el_proveedor_que_habia(configuracion, monkeypatch):
+    _respuestas(configuracion, monkeypatch, False)
+    _con_memorias_de_openai(configuracion)
+    _elegir_gemini_a_mano(configuracion)
 
+    seccion = configuracion.secciones["embedding"]
+    assert seccion.proveedor.currentData() == "openai"
+    assert seccion.modelo_actual() == "text-embedding-3-large"
+    assert configuracion.cambio_de_embedding() is None
+
+
+def test_continuar_no_vuelve_a_preguntar_al_guardar(configuracion, ventana, monkeypatch):
+    preguntas = _respuestas(configuracion, monkeypatch, True)
     enviado = []
     ventana.motor.post = lambda *a, **k: enviado.append(a)
-    monkeypatch.setattr(modulo.QMessageBox, "question", lambda *a, **k: modulo.QMessageBox.Yes)
     _con_memorias_de_openai(configuracion)
-    _elegir_gemini(configuracion)
+    _elegir_gemini_a_mano(configuracion)
     configuracion._guardar()
 
+    assert len(preguntas) == 1
     assert enviado
+
+
+def test_si_no_se_aviso_al_elegir_se_avisa_al_guardar(configuracion, ventana, monkeypatch):
+    preguntas = _respuestas(configuracion, monkeypatch, False)
+    enviado = []
+    ventana.motor.post = lambda *a, **k: enviado.append(a)
+    _con_memorias_de_openai(configuracion)
+    _elegir_gemini(configuracion)  # sin `activated`
+    configuracion._guardar()
+
+    assert preguntas and enviado == []
 
 
 def test_sin_memorias_o_sin_cambiarlo_no_pregunta(configuracion):
