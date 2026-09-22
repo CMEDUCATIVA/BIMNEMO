@@ -270,7 +270,7 @@ def iniciar_descarga() -> dict[str, Any]:
     No bloquea: el instalador corre en un hilo y la ventana consulta
     :func:`progreso_descarga` para pintar la barra.
     """
-    global _descarga_hilo
+    global _descarga, _descarga_hilo
     if _descarga["state"] == "descargando":
         return {"started": False, "state": "descargando"}
     if _hay_binario():
