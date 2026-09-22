@@ -145,14 +145,14 @@ USO = {
 def test_la_tarjeta_pinta_filas_y_totales(aplicacion):
     from lightrag.api.bimnemo.nativo.consumo import (
         COSTE,
-        ENTRADA,
         TAREA,
+        TOKENS,
         TarjetaConsumo,
     )
 
     tarjeta = TarjetaConsumo(_Motor(USO))
     assert tarjeta.tabla.rowCount() == 2
-    assert tarjeta.tabla.item(0, ENTRADA).text() == "252.000"
+    assert tarjeta.tabla.item(0, TOKENS).text() == "252.000 / 168.000"
     assert tarjeta.tabla.item(0, COSTE).text() == "$0,1386"
     assert tarjeta.tabla.item(1, TAREA).text() == "Embeddings"
     assert tarjeta.tabla.item(1, COSTE).text() == "sin precio"
@@ -297,7 +297,77 @@ def test_la_tabla_dice_el_razonamiento_y_cuanto_se_penso(aplicacion):
     ]
     tarjeta = TarjetaConsumo(_Motor(dict(USO, rows=filas, revision=123)))
     celda = lambda i: tarjeta.tabla.item(i, RAZONAMIENTO).text()  # noqa: E731
-    assert celda(0) == "Por defecto · 68 % pensando"
+    assert celda(0) == "Por defecto · 68 %"
     assert celda(1) == "Apagado"
     assert celda(2) == "—"
     assert celda(3) == "—"
+
+
+# -- fecha con hora, tiempo y borrar ------------------------------------------
+
+
+def test_la_fecha_dice_de_que_hora_a_que_hora(aplicacion):
+    from datetime import datetime, timezone
+
+    from lightrag.api.bimnemo.nativo.consumo import fecha_de
+
+    ini = datetime(2026, 9, 22, 13, 44, tzinfo=timezone.utc)
+    fin = datetime(2026, 9, 22, 14, 12, tzinfo=timezone.utc)
+    texto = fecha_de({"inicio": ini.isoformat(), "fin": fin.isoformat()})
+    local = lambda d: d.astimezone().strftime("%H:%M")  # noqa: E731
+    assert texto.endswith(f"{local(ini)}–{local(fin)}")
+    # Lo contado antes de medir horas: solo el día.
+    assert fecha_de({"fecha": "2026-09-21"}) == "21/09/2026"
+
+
+def test_el_tiempo_de_un_archivo_es_de_principio_a_fin_y_el_del_chat_la_suma():
+    from lightrag.api.bimnemo.nativo.consumo import duracion, tiempo_de
+
+    archivo = {
+        "archivo": "ley.pdf",
+        "inicio": "2026-09-22T13:00:00+00:00",
+        "fin": "2026-09-22T13:12:30+00:00",
+        "segundos": 2000.0,
+    }
+    assert tiempo_de(archivo)[0] == "12 min 30 s"  # no los 2000 s sumados
+    chat = {"archivo": "", "tarea": "Responder", "segundos": 45.4}
+    assert tiempo_de(chat)[0] == "45 s"
+    assert tiempo_de({"tarea": "Indexar"})[0] == "—"
+    assert duracion(3900) == "1 h 05 min"
+
+
+class _MotorBorra(_Motor):
+    def __init__(self, respuesta):
+        super().__init__(respuesta)
+        self.borrados = []
+
+    def borrar(self, ruta, cuerpo=None, bien=None, mal=None):
+        self.borrados.append(ruta)
+        if bien:
+            bien({"status": "deleted"})
+
+
+def _con_id():
+    fila = dict(
+        USO["rows"][0], id="2026-09-22|llm|Indexar|deepseek-flash|ley.pdf|Apagado"
+    )
+    return dict(USO, rows=[fila], revision=500)
+
+
+def test_cada_fila_tiene_su_papelera_y_pregunta_antes(aplicacion):
+    from PySide6.QtWidgets import QPushButton
+
+    from lightrag.api.bimnemo.nativo.consumo import ACCIONES, TarjetaConsumo
+
+    motor = _MotorBorra(_con_id())
+    tarjeta = TarjetaConsumo(motor)
+    boton = tarjeta.tabla.cellWidget(0, ACCIONES).findChildren(QPushButton)[0]
+
+    tarjeta.confirmar = lambda *_: False
+    boton.click()
+    assert motor.borrados == []
+
+    tarjeta.confirmar = lambda *_: True
+    boton.click()
+    assert motor.borrados and motor.borrados[0].startswith("/bimnemo/usage?id=")
+    assert "%7C" in motor.borrados[0]  # la clave va entera y escapada

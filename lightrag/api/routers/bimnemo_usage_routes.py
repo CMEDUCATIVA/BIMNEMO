@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from lightrag.api.bimnemo import consumo
@@ -82,6 +82,23 @@ def create_bimnemo_usage_routes(api_key: Optional[str] = None) -> APIRouter:
             running_model=os.getenv("LLM_MODEL", ""),
             saved_model=guardado.get("LLM_MODEL", ""),
         )
+
+    @router.delete(
+        "/usage",
+        dependencies=[Depends(combined_auth)],
+        summary="Quitar una fila de la tabla de consumo",
+    )
+    async def delete_usage(
+        id: str = Query(description="El `id` de la fila, tal como lo da GET /usage"),
+    ) -> dict[str, Any]:
+        """Borra una fila del registro de consumo de BIMNEMO.
+
+        Solo del registro: lo que el proveedor ya cobró sigue cobrado. Sirve
+        para limpiar pruebas o lo que ya no interesa seguir mirando.
+        """
+        if not consumo.REGISTRO.borrar(id):
+            raise HTTPException(status_code=404, detail="Esa fila ya no está.")
+        return {"status": "deleted", "message": "Fila quitada de la tabla."}
 
     return router
 

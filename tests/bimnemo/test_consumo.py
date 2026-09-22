@@ -302,3 +302,48 @@ def test_el_conector_de_openai_pasa_los_tokens_de_razonamiento():
     )
     assert _reasoning_tokens(uso) == 42
     assert _reasoning_tokens(SimpleNamespace()) == 0
+
+
+# --- tiempo y borrar -----------------------------------------------------------
+
+
+def test_cada_fila_guarda_de_que_hora_a_que_hora_y_cuanto_tardo(registro):
+    from datetime import timedelta
+
+    t0 = datetime(2026, 9, 22, 13, 0, tzinfo=timezone.utc)
+    for minuto, dura in ((0, 30), (5, 20)):
+        inicio = t0 + timedelta(minutes=minuto)
+        registro.anotar(
+            "llm",
+            "Indexar",
+            "deepseek-flash",
+            "",
+            1,
+            1,
+            momento=inicio + timedelta(seconds=dura),
+            archivo="ley.pdf",
+            inicio=inicio,
+        )
+    fila = _fila(registro, "deepseek-flash")
+    assert fila["inicio"] == t0.isoformat()
+    assert fila["fin"] == (t0 + timedelta(minutes=5, seconds=20)).isoformat()
+    assert fila["segundos"] == 50
+
+
+def test_el_contador_mide_desde_que_se_crea(registro):
+    import time as reloj
+
+    contador = consumo.Contador("llm", "Responder", "gpt-5-nano")
+    reloj.sleep(0.05)
+    contador.add_usage({"prompt_tokens": 1, "completion_tokens": 1})
+    assert _fila(registro, "gpt-5-nano")["segundos"] >= 0.05
+
+
+def test_borrar_una_fila_la_quita_y_cambia_la_revision(registro):
+    registro.anotar("llm", "Indexar", "gpt-5-nano", "", 1, 1)
+    fila = registro.resumen()["rows"][0]
+    antes = registro.revision
+    assert registro.borrar(fila["id"]) is True
+    assert registro.resumen()["rows"] == []
+    assert registro.revision > antes
+    assert registro.borrar(fila["id"]) is False

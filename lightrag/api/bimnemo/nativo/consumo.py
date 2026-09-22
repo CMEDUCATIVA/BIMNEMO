@@ -17,7 +17,9 @@ la tabla.
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any, Optional
+from urllib.parse import quote
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -25,26 +27,29 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QWidget,
 )
 
+from lightrag.api.bimnemo.nativo import iconos
 from lightrag.api.bimnemo.nativo.motor import Motor
 from lightrag.api.bimnemo.nativo.piezas import Aviso, Tarjeta
 
 SONDEO_MS = 3_000
 
 COLUMNAS = (
-    "Fecha",
+    "Fecha y hora",
     "Tarea",
     "Archivo",
     "Modelo",
     "Razonamiento",
-    "Llamadas",
-    "Tokens entrada",
-    "Tokens salida",
+    "Tokens ent. / sal.",
+    "Tiempo",
     "Coste (USD)",
+    "Acciones",
 )
 (
     FECHA,
@@ -52,12 +57,12 @@ COLUMNAS = (
     ARCHIVO,
     MODELO,
     RAZONAMIENTO,
-    LLAMADAS,
-    ENTRADA,
-    SALIDA,
+    TOKENS,
+    TIEMPO,
     COSTE,
+    ACCIONES,
 ) = range(len(COLUMNAS))
-NUMERICAS = (LLAMADAS, ENTRADA, SALIDA, COSTE)
+NUMERICAS = (TOKENS, TIEMPO, COSTE)
 
 #: El nivel «Lo que decida el modelo», abreviado: en la tabla no cabe entero
 #: junto al porcentaje.
@@ -84,8 +89,8 @@ def archivo_de(fila: dict[str, Any]) -> str:
 def razonamiento_de(fila: dict[str, Any]) -> str:
     """El nivel configurado y, si el proveedor lo informa, cuánto se pensó.
 
-    «Por defecto · 68 % pensando». El porcentaje es de los tokens de salida,
-    que es lo que se paga caro. Si el proveedor no informa del razonamiento,
+    «Por defecto · 68 %». El porcentaje es de los tokens de salida, que es
+    lo que se paga caro. Si el proveedor no informa del razonamiento,
     solo el nivel: un 0 % sería afirmar algo que no se sabe. Los embeddings
     no razonan, y lo contado antes de este dato sale «—».
     """
@@ -96,8 +101,68 @@ def razonamiento_de(fila: dict[str, Any]) -> str:
     salida = int(fila.get("salida") or 0)
     razonando = int(fila.get("razonando") or 0)
     if salida and razonando:
-        return f"{nivel} · {round(razonando * 100 / salida)} % pensando"
+        return f"{nivel} · {round(razonando * 100 / salida)} %"
     return nivel
+
+
+def _hora(iso: Any) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(str(iso)).astimezone()
+    except (TypeError, ValueError):
+        return None
+
+
+def fecha_de(fila: dict[str, Any]) -> str:
+    """«22/09 · 08:44–09:12»: el día y de qué hora a qué hora hubo llamadas.
+
+    Cada fila junta un día de llamadas de un archivo y modelo; una sola hora
+    diría solo la última. Lo contado antes de medir horas enseña solo el día.
+    """
+    inicio, fin = _hora(fila.get("inicio")), _hora(fila.get("fin"))
+    if inicio is None or fin is None:
+        dia = str(fila.get("fecha") or "")
+        try:
+            return date.fromisoformat(dia).strftime("%d/%m/%Y")
+        except ValueError:
+            return dia
+    desde, hasta = inicio.strftime("%H:%M"), fin.strftime("%H:%M")
+    horas = desde if desde == hasta else f"{desde}–{hasta}"
+    return f"{fin.strftime('%d/%m')} · {horas}"
+
+
+def duracion(segundos: float) -> str:
+    """45 s · 12 min 30 s · 1 h 05 min."""
+    segundos = int(round(segundos))
+    if segundos < 60:
+        return f"{segundos} s"
+    minutos, s = divmod(segundos, 60)
+    if minutos < 60:
+        return f"{minutos} min {s:02d} s"
+    horas, m = divmod(minutos, 60)
+    return f"{horas} h {m:02d} min"
+
+
+def tiempo_de(fila: dict[str, Any]) -> tuple[str, str]:
+    """Lo que tardó, y cómo se ha medido (para el rótulo emergente).
+
+    - Un **archivo**: de la primera llamada a la última, lo que tardó su
+      indexación. Sumar las llamadas daría de más: van varias a la vez.
+    - Lo demás (**preguntas del chat**): la suma de lo que tardó cada una. De
+      la primera pregunta del día a la última no es tiempo de nadie.
+    """
+    if fila.get("archivo"):
+        inicio, fin = _hora(fila.get("inicio")), _hora(fila.get("fin"))
+        if inicio is not None and fin is not None:
+            return (
+                duracion((fin - inicio).total_seconds()),
+                "Desde la primera llamada hasta la última: lo que tardó.",
+            )
+    elif fila.get("segundos") is not None:
+        return (
+            duracion(float(fila["segundos"])),
+            "La suma de lo que tardó en contestar cada llamada.",
+        )
+    return "—", "Contado antes de que BIMNEMO midiera el tiempo."
 
 
 #: Filas que se ven sin desplazar. Con más, la tabla se desplaza por dentro
@@ -156,18 +221,23 @@ class TarjetaConsumo(Tarjeta):
         # barra horizontal. Solo el archivo se estira: es el nombre largo.
         cabecera.setMinimumSectionSize(60)
         for columna, ancho in (
-            (FECHA, 92),
-            (TAREA, 110),
-            (MODELO, 160),
-            (RAZONAMIENTO, 200),
-            (LLAMADAS, 76),
-            (ENTRADA, 110),
-            (SALIDA, 100),
-            (COSTE, 96),
+            (FECHA, 146),
+            (TAREA, 112),
+            (MODELO, 140),
+            (RAZONAMIENTO, 140),
+            (TOKENS, 140),
+            (TIEMPO, 92),
+            (COSTE, 84),
         ):
             cabecera.setSectionResizeMode(columna, QHeaderView.Interactive)
             self.tabla.setColumnWidth(columna, ancho)
         cabecera.setSectionResizeMode(ARCHIVO, QHeaderView.Stretch)
+        # La de acciones lleva un botón de tamaño fijo: estirarla solo deja hueco.
+        cabecera.setSectionResizeMode(ACCIONES, QHeaderView.Fixed)
+        self.tabla.setColumnWidth(ACCIONES, 64)
+        cabecera_tokens = self.tabla.horizontalHeaderItem(TOKENS)
+        if cabecera_tokens is not None:
+            cabecera_tokens.setToolTip("Tokens de entrada / tokens de salida")
         for columna in NUMERICAS:
             item = self.tabla.horizontalHeaderItem(columna)
             if item is not None:
@@ -265,15 +335,18 @@ class TarjetaConsumo(Tarjeta):
     def _pintar_filas(self, filas: list[dict[str, Any]]) -> None:
         self.tabla.setRowCount(len(filas))
         for i, fila in enumerate(filas):
+            tiempo, como = tiempo_de(fila)
             valores = {
-                FECHA: str(fila.get("fecha") or ""),
+                FECHA: fecha_de(fila),
                 TAREA: str(fila.get("tarea") or ""),
                 ARCHIVO: archivo_de(fila),
                 MODELO: str(fila.get("modelo") or ""),
                 RAZONAMIENTO: razonamiento_de(fila),
-                LLAMADAS: miles(fila.get("llamadas") or 0),
-                ENTRADA: miles(fila.get("entrada") or 0),
-                SALIDA: miles(fila.get("salida") or 0),
+                TOKENS: (
+                    f"{miles(fila.get('entrada') or 0)} / "
+                    f"{miles(fila.get('salida') or 0)}"
+                ),
+                TIEMPO: tiempo,
                 COSTE: coste_de(fila),
             }
             for columna, texto in valores.items():
@@ -283,7 +356,16 @@ class TarjetaConsumo(Tarjeta):
                 if columna in (ARCHIVO, MODELO, RAZONAMIENTO):
                     # Recortados con puntos suspensivos: el nombre entero, aquí.
                     item.setToolTip(texto)
+                if columna == TIEMPO:
+                    item.setToolTip(como)
+                if columna == TOKENS:
+                    item.setToolTip(f"{miles(fila.get('llamadas') or 0)} llamadas")
+                if columna == RAZONAMIENTO and "%" in texto:
+                    item.setToolTip(
+                        "Nivel configurado · parte de la salida que fue razonamiento"
+                    )
                 self.tabla.setItem(i, columna, item)
+            self.tabla.setCellWidget(i, ACCIONES, self._acciones(fila))
 
         vacia = not filas
         self.tabla.setVisible(not vacia)
@@ -299,5 +381,58 @@ class TarjetaConsumo(Tarjeta):
             + self.tabla.horizontalScrollBar().sizeHint().height()
         )
 
+    # -- acciones -----------------------------------------------------------
 
-__all__ = ["TarjetaConsumo", "coste_de", "dinero", "miles"]
+    def _acciones(self, fila: dict[str, Any]) -> QWidget:
+        caja_exterior = QWidget()
+        caja_exterior.setObjectName("fila")
+        caja = QHBoxLayout(caja_exterior)
+        caja.setContentsMargins(4, 2, 8, 2)
+        caja.addStretch(1)
+        borrar = QPushButton()
+        borrar.setObjectName("icono")
+        iconos.poner(borrar, "borrar", 14)
+        borrar.setToolTip("Quitar esta fila de la tabla")
+        borrar.setCursor(Qt.PointingHandCursor)
+        borrar.setFixedSize(30, 26)
+        borrar.setEnabled(bool(fila.get("id")))
+        borrar.clicked.connect(lambda: self._borrar(fila))
+        caja.addWidget(borrar)
+        return caja_exterior
+
+    def _borrar(self, fila: dict[str, Any]) -> None:
+        que = archivo_de(fila)
+        que = que if que != "—" else str(fila.get("tarea") or "esta fila")
+        respuesta = self.confirmar(
+            "Quitar de la tabla",
+            f"Se quitará la fila de «{que}» ({fila.get('modelo')}, "
+            f"{fecha_de(fila)}) de la tabla de uso y coste.\n\n"
+            "Solo se borra de este registro: lo que el proveedor ya cobró "
+            "sigue cobrado. Esto no se puede deshacer. ¿Seguir?",
+        )
+        if not respuesta:
+            return
+        self.motor.borrar(
+            f"/bimnemo/usage?id={quote(str(fila['id']), safe='')}",
+            None,
+            lambda _datos: self.mirar(),
+            lambda motivo: self.pendiente.fallar(f"No se pudo quitar: {motivo}"),
+        )
+
+    def confirmar(self, titulo: str, texto: str) -> bool:
+        """Pregunta sí o no. Aparte para poder sustituirlo en las pruebas."""
+        return (
+            QMessageBox.question(self, titulo, texto, QMessageBox.Yes | QMessageBox.No)
+            == QMessageBox.Yes
+        )
+
+
+__all__ = [
+    "TarjetaConsumo",
+    "coste_de",
+    "dinero",
+    "duracion",
+    "fecha_de",
+    "miles",
+    "tiempo_de",
+]

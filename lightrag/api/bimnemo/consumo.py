@@ -120,6 +120,7 @@ class _Registro:
         archivo: str = "",
         nivel: str = "",
         razonando: int = 0,
+        inicio: Optional[datetime] = None,
     ) -> None:
         """Suma una llamada.
 
@@ -128,8 +129,13 @@ class _Registro:
         tokens de salida que el proveedor dice que fueron razonamiento. Con
         los dos se ve si lo configurado se cumplió: «Apagado» con un 60 %
         pensando es que el proveedor no hizo caso.
+
+        ``inicio`` es cuándo empezó la llamada y ``momento`` cuándo acabó. La
+        fila guarda el primer inicio y el último fin —de qué hora a qué hora
+        se trabajó en ese archivo— y la suma de lo que tardó cada llamada.
         """
         momento = momento or datetime.now(timezone.utc)
+        inicio = inicio or momento
         p = precios.precio(tipo, modelo, host, momento)
         importe = precios.coste(p, entrada, salida)
         dia = momento.astimezone().date().isoformat()
@@ -156,8 +162,17 @@ class _Registro:
             fila["llamadas"] += 1
             fila["entrada"] += int(entrada)
             fila["salida"] += int(salida)
-            # Las filas de antes de contar el razonamiento no traen la clave.
+            # Las filas de antes de contar el razonamiento o el tiempo no traen
+            # esas claves.
             fila["razonando"] = fila.get("razonando", 0) + int(razonando)
+            ini, fin = inicio.astimezone(timezone.utc), momento.astimezone(timezone.utc)
+            if not fila.get("inicio") or ini.isoformat() < fila["inicio"]:
+                fila["inicio"] = ini.isoformat()
+            if not fila.get("fin") or fin.isoformat() > fila["fin"]:
+                fila["fin"] = fin.isoformat()
+            fila["segundos"] = round(
+                fila.get("segundos", 0.0) + max((fin - ini).total_seconds(), 0.0), 3
+            )
             if importe is None:
                 fila["sin_precio"] = True
             else:
@@ -181,6 +196,15 @@ class _Registro:
             # Medir no puede tumbar una indexación.
             logger.warning("BIMNEMO: no se pudo guardar el consumo: %s", exc)
 
+    def borrar(self, clave: str) -> bool:
+        """Quita una fila de la tabla. Solo del registro: la factura es otra cosa."""
+        with self._cerrojo:
+            if self._filas.pop(clave, None) is None:
+                return False
+            self.revision += 1
+            self._guardar()
+            return True
+
     def resumen(self, dias: int = 30, hoy: Optional[date] = None) -> dict[str, Any]:
         """Filas de los últimos ``dias`` y totales de hoy, 7 y 30 días."""
         hoy = hoy or datetime.now().astimezone().date()
@@ -188,7 +212,8 @@ class _Registro:
         hace7 = (hoy - timedelta(days=6)).isoformat()
         hace30 = (hoy - timedelta(days=29)).isoformat()
         with self._cerrojo:
-            filas = [dict(f) for f in self._filas.values()]
+            # `id` es la clave del agregado: con ella se borra una fila.
+            filas = [dict(f, id=clave) for clave, f in self._filas.items()]
             revision = self.revision
 
         def suma(desde_dia: str) -> dict[str, Any]:
@@ -201,9 +226,10 @@ class _Registro:
                 "sin_precio": any(f["sin_precio"] for f in elegidas),
             }
 
+        # Lo último primero: por día y, dentro del día, por cuándo acabó.
         visibles = sorted(
             (f for f in filas if f["fecha"] >= desde),
-            key=lambda f: (f["fecha"], f["coste"]),
+            key=lambda f: (f["fecha"], f.get("fin") or "", f["coste"]),
             reverse=True,
         )
         return {
@@ -232,6 +258,8 @@ class Contador:
         self.modelo = modelo or "?"
         self.host = host or ""
         self.nivel = nivel
+        # Se crea justo antes de llamar al proveedor: es el inicio de la llamada.
+        self.inicio = datetime.now(timezone.utc)
 
     def add_usage(self, cuentas: dict[str, Any]) -> None:
         try:
@@ -255,6 +283,7 @@ class Contador:
                 archivo=DOCUMENTO.get(),
                 nivel=self.nivel,
                 razonando=min(razonando, max(salida, 0)),
+                inicio=self.inicio,
             )
         except Exception as exc:  # medir nunca rompe la llamada que se mide
             logger.warning("BIMNEMO: no se pudo contar el consumo: %s", exc)
