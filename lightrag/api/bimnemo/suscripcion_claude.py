@@ -6,13 +6,14 @@ credenciales en ``~/.claude``. Este módulo da a la pantalla de configuración
 lo que necesita para el modo «por suscripción»:
 
 * **estado** — si hay una sesión iniciada (CLI o fichero de credenciales).
-* **iniciar_sesion** — abre el login OAuth oficial y espera a que termine.
-* **probar** — hace una petición real, sin herramientas, para comprobar que la
-  suscripción responde de verdad.
-* **descargar** — instala el binario de Claude Code con el instalador oficial.
+* **iniciar_sesion / cerrar_sesion** — login y logout OAuth oficiales.
+* **probar** — petición real, sin herramientas, para comprobar la suscripción.
+* **iniciar_descarga / progreso_descarga** — instalar el binario en segundo
+  plano e informar del avance para la barra de la ventana.
 
-Todo aquí es código síncrono con ``subprocess``; los endpoints lo ejecutan en
-un hilo (``asyncio.to_thread``) para no bloquear el bucle del motor.
+La descarga corre en un hilo aparte y expone su estado en
+:func:`progreso_descarga`; así la ventana enseña una barra de avance y cambia
+de etapa cuando termina, sin bloquearse.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -34,8 +36,7 @@ STATUS_TIMEOUT = 15.0
 #: Plazo del login OAuth. El usuario tiene que terminar en el navegador.
 LOGIN_TIMEOUT = 600.0
 
-#: Plazo de la prueba de conexión. Una llamada real de Claude Code en frío
-#: puede tardar varios segundos; treinta es un margen razonable.
+#: Plazo de la prueba de conexión.
 PROBE_TIMEOUT = 60.0
 
 #: Plazo de la descarga/instalación del binario. Depende de la red.
@@ -51,12 +52,46 @@ TOKEN_OAUTH = re.compile(r"sk-ant-oat[\w-]+")
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
+def _candidatos() -> list[Path]:
+    """Los sitios donde el instalador oficial deja el binario.
+
+    El PATH del motor **no cambia** después de instalar: si el instalador lo
+    añade al PATH del usuario, el proceso en marcha no lo ve. Por eso, además
+    de ``claude`` en el PATH, se miran las ubicaciones de instalación directas.
+    """
+    home = Path.home()
+    nombre = "claude.exe" if os.name == "nt" else "claude"
+    candidatos = [
+        home / ".local" / "bin" / nombre,
+        home / ".claude" / "local" / nombre,
+    ]
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            candidatos.append(Path(appdata) / "npm" / "claude.cmd")
+    return candidatos
+
+
 def binario() -> str:
-    """El ejecutable de Claude Code, con la ruta explícita ganando al PATH."""
+    """El ejecutable de Claude Code, o ``"claude"`` si no se encuentra.
+
+    Orden: ``CLAUDE_CODE_BIN`` (ruta explícita), ``claude`` en el PATH y, por
+    último, los sitios del instalador oficial.
+    """
     explicito = os.environ.get("CLAUDE_CODE_BIN", "").strip()
-    if explicito:
+    if explicito and Path(explicito).is_file():
         return explicito
-    return shutil.which("claude") or "claude"
+    del_path = shutil.which("claude")
+    if del_path:
+        return del_path
+    for candidato in _candidatos():
+        if candidato.is_file():
+            return str(candidato)
+    return "claude"
+
+
+def _hay_binario() -> bool:
+    return binario() != "claude"
 
 
 def credenciales() -> Path:
@@ -73,11 +108,7 @@ def _limpiar(texto: str) -> str:
 
 
 def _ejecutar(orden: list[str], timeout: float) -> tuple[int, str, str]:
-    """Ejecuta un comando y devuelve ``(código, stdout, stderr)``.
-
-    La salida se captura entera pero el módulo solo la usa de forma acotada y
-    redactada. ``FileNotFoundError`` se normaliza a un mensaje legible.
-    """
+    """Ejecuta un comando y devuelve ``(código, stdout, stderr)``."""
     try:
         resultado = subprocess.run(
             orden,
@@ -116,7 +147,7 @@ def estado() -> dict[str, Any]:
         }
 
     # El CLI no contesta: el fichero de credenciales sirve de respaldo con
-    # CLIs más antiguos, igual que hace la app de escritorio de Kun.
+    # CLIs más antiguos.
     if credenciales().is_file():
         return {"logged_in": True, "source": "credentials-file", "message": ""}
 
@@ -134,9 +165,6 @@ def iniciar_sesion() -> dict[str, Any]:
 
     ``--claudeai`` fuerza el camino de claude.ai (suscripción) en vez del
     prompt interactivo que pregunta entre claude.ai y la consola de Anthropic.
-    El proceso queda esperando a que el navegador complete el OAuth; aquí se
-    deja correr hasta que cierre o se agote el plazo, y luego se relee el
-    estado real.
     """
     if estado()["logged_in"]:
         return {"ok": True, "message": "ya-hay-sesion"}
@@ -153,12 +181,22 @@ def iniciar_sesion() -> dict[str, Any]:
     return {"ok": False, "message": detalle or "login-incompleto"}
 
 
-def probar() -> dict[str, Any]:
-    """Hace una petición real sin herramientas para probar la suscripción.
+def cerrar_sesion() -> dict[str, Any]:
+    """Cierra la sesión OAuth de Claude Code."""
+    codigo, salida, error = _ejecutar([binario(), "auth", "logout"], STATUS_TIMEOUT * 4)
+    if codigo == 0:
+        return {"ok": True, "message": ""}
+    if codigo == -1 and error == "claude-cli-no-encontrado":
+        return {"ok": False, "message": "claude-cli-no-encontrado"}
+    # Aunque el CLI no confirme, si ya no queda fichero de credenciales, la
+    # sesión está cerrada de hecho.
+    if not credenciales().is_file():
+        return {"ok": True, "message": ""}
+    return {"ok": False, "message": _limpiar(error or salida) or "no-se-pudo-cerrar"}
 
-    Un código de salida 0 prueba que la autenticación funciona de verdad
-    contra el backend, no solo que existe una credencial en disco.
-    """
+
+def probar() -> dict[str, Any]:
+    """Hace una petición real sin herramientas para probar la suscripción."""
     inicio = time.monotonic()
     orden = [
         binario(),
@@ -188,19 +226,17 @@ def probar() -> dict[str, Any]:
     }
 
 
-def descargar() -> dict[str, Any]:
-    """Instala el binario de Claude Code con el instalador oficial.
+# -- descarga en segundo plano ----------------------------------------------
 
-    Se usa la vía oficial de Anthropic por plataforma. Es una operación de red
-    larga; el endpoint la corre en un hilo y la ventana enseña su propio
-    estado de «descargando» mientras tanto.
-    """
-    if binario() != "claude" and shutil.which(binario()):
-        return {"ok": True, "message": "ya-instalado"}
+#: Estado de la descarga. ``state`` ∈ inactivo | descargando | instalado | error.
+_descarga: dict[str, str] = {"state": "inactivo", "message": ""}
+_descarga_hilo: threading.Thread | None = None
 
-    plataforma = os.name
-    if plataforma == "nt":
-        orden = [
+
+def _instalador() -> list[str]:
+    """El comando del instalador oficial de Claude Code, por plataforma."""
+    if os.name == "nt":
+        return [
             "powershell",
             "-NoProfile",
             "-ExecutionPolicy",
@@ -208,25 +244,56 @@ def descargar() -> dict[str, Any]:
             "-Command",
             "irm https://claude.ai/install.ps1 | iex",
         ]
+    return ["bash", "-lc", "curl -fsSL https://claude.ai/install.sh | bash"]
+
+
+def _correr_descarga() -> None:
+    """El cuerpo del hilo de descarga: instala y actualiza el estado."""
+    global _descarga
+    _descarga = {"state": "descargando", "message": ""}
+    codigo, salida, error = _ejecutar(_instalador(), INSTALL_TIMEOUT)
+    if _hay_binario():
+        _descarga = {"state": "instalado", "message": ""}
+        logger.info("BIMNEMO: binario de Claude Code instalado")
     else:
-        orden = ["bash", "-lc", "curl -fsSL https://claude.ai/install.sh | bash"]
+        detalle = _limpiar(error or salida)
+        _descarga = {
+            "state": "error",
+            "message": detalle or f"instalacion-exit-{codigo}",
+        }
+        logger.warning("BIMNEMO: no se pudo instalar Claude Code: %s", _descarga["message"])
 
-    logger.info("BIMNEMO: instalando Claude Code (%s)", "powershell" if plataforma == "nt" else "curl")
-    codigo, salida, error = _ejecutar(orden, INSTALL_TIMEOUT)
 
-    if shutil.which("claude") or (
-        "CLAUDE_CODE_BIN" in os.environ and Path(os.environ["CLAUDE_CODE_BIN"]).is_file()
-    ):
-        return {"ok": True, "message": ""}
-    detalle = _limpiar(error or salida)
-    return {"ok": False, "message": detalle or f"instalacion-exit-{codigo}"}
+def iniciar_descarga() -> dict[str, Any]:
+    """Arranca la instalación si no está en curso y devuelve el estado actual.
+
+    No bloquea: el instalador corre en un hilo y la ventana consulta
+    :func:`progreso_descarga` para pintar la barra.
+    """
+    global _descarga_hilo
+    if _descarga["state"] == "descargando":
+        return {"started": False, "state": "descargando"}
+    if _hay_binario():
+        _descarga = {"state": "instalado", "message": ""}
+        return {"started": False, "state": "instalado"}
+    _descarga = {"state": "descargando", "message": ""}
+    _descarga_hilo = threading.Thread(target=_correr_descarga, daemon=True)
+    _descarga_hilo.start()
+    return {"started": True, "state": "descargando"}
+
+
+def progreso_descarga() -> dict[str, Any]:
+    """El estado de la instalación: inactivo, descargando, instalado o error."""
+    return dict(_descarga)
 
 
 __all__ = [
     "binario",
+    "cerrar_sesion",
     "credenciales",
-    "descargar",
     "estado",
+    "iniciar_descarga",
     "iniciar_sesion",
     "probar",
+    "progreso_descarga",
 ]

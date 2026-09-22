@@ -502,6 +502,15 @@ def create_bimnemo_settings_routes(
         return await asyncio.to_thread(suscripcion_claude.iniciar_sesion)
 
     @router.post(
+        "/claude-subscription/logout",
+        dependencies=[Depends(combined_auth)],
+        summary="Cerrar la sesión OAuth de Claude Code",
+    )
+    async def claude_subscription_logout() -> dict[str, Any]:
+        """Cierra la sesión OAuth oficial de Claude Code."""
+        return await asyncio.to_thread(suscripcion_claude.cerrar_sesion)
+
+    @router.post(
         "/claude-subscription/probe",
         dependencies=[Depends(combined_auth)],
         summary="Probar que la suscripción responde con una petición real",
@@ -513,11 +522,20 @@ def create_bimnemo_settings_routes(
     @router.post(
         "/claude-subscription/download",
         dependencies=[Depends(combined_auth)],
-        summary="Instalar el binario de Claude Code",
+        summary="Arrancar la instalación del binario de Claude Code",
     )
     async def claude_subscription_download() -> dict[str, Any]:
-        """Descarga e instala el binario con el instalador oficial de Anthropic."""
-        return await asyncio.to_thread(suscripcion_claude.descargar)
+        """Arranca la descarga en segundo plano y devuelve el estado actual."""
+        return suscripcion_claude.iniciar_descarga()
+
+    @router.get(
+        "/claude-subscription/download-progress",
+        dependencies=[Depends(combined_auth)],
+        summary="Estado de la descarga del binario de Claude Code",
+    )
+    async def claude_subscription_download_progress() -> dict[str, Any]:
+        """Informa del avance de la instalación para la barra de la ventana."""
+        return suscripcion_claude.progreso_descarga()
 
     @router.post(
         "/restart",

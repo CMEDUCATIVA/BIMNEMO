@@ -24,6 +24,7 @@ import asyncio
 import os
 import shutil
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from lightrag.utils import logger
@@ -40,11 +41,26 @@ MODO_PERMISOS = "plan"
 
 
 def _binario() -> str:
-    """El ejecutable de Claude Code, con la ruta explícita ganando al PATH."""
+    """El ejecutable de Claude Code, o ``"claude"`` si no se encuentra.
+
+    Tras instalar, el binario suele quedar en ``~/.local/bin`` o
+    ``~/.claude/local``, no necesariamente en el PATH del motor (que no cambia
+    mientras corre). Se miran esos sitios además del PATH.
+    """
     explicito = os.environ.get("CLAUDE_CODE_BIN", "").strip()
-    if explicito:
+    if explicito and Path(explicito).is_file():
         return explicito
-    return shutil.which("claude") or "claude"
+    del_path = shutil.which("claude")
+    if del_path:
+        return del_path
+    nombre = "claude.exe" if os.name == "nt" else "claude"
+    for candidato in (
+        Path.home() / ".local" / "bin" / nombre,
+        Path.home() / ".claude" / "local" / nombre,
+    ):
+        if candidato.is_file():
+            return str(candidato)
+    return "claude"
 
 
 def _texto_de_bloque(contenido: Any) -> str:

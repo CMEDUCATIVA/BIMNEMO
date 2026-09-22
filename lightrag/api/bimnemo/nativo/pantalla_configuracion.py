@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -367,7 +367,7 @@ class Seccion(QWidget):
         if suscripcion:
             self.host.clear()
             self.api_key.clear()
-            self._pintar_estado_suscripcion()
+            self._refrescar_suscripcion()
 
     def _cambio_modo(self) -> None:
         self._aplicar_modo()
@@ -379,124 +379,188 @@ class Seccion(QWidget):
         columna.setContentsMargins(0, 6, 0, 0)
         columna.setSpacing(8)
 
-        self.suscripcion_estado = QLabel(
-            "Descarga el binario de Claude Code y después inicia sesión."
-        )
-        self.suscripcion_estado.setObjectName("descripcion")
-        self.suscripcion_estado.setWordWrap(True)
-        columna.addWidget(self.suscripcion_estado)
+        self.descarga_estado = QLabel("")
+        self.descarga_estado.setObjectName("descripcion")
+        self.descarga_estado.setWordWrap(True)
+        columna.addWidget(self.descarga_estado)
 
-        fila = QWidget()
-        fila.setObjectName("fila")
-        caja = QHBoxLayout(fila)
-        caja.setContentsMargins(0, 0, 0, 0)
-        caja.setSpacing(8)
+        # Etapa 1: descargar el binario.
+        self.fila_descarga = QWidget()
+        self.fila_descarga.setObjectName("fila")
+        caja_descarga = QHBoxLayout(self.fila_descarga)
+        caja_descarga.setContentsMargins(0, 0, 0, 0)
+        caja_descarga.setSpacing(8)
         self.boton_descargar = QPushButton("Descargar binario")
         self.boton_descargar.setCursor(Qt.PointingHandCursor)
         self.boton_descargar.clicked.connect(self._descargar)
-        caja.addWidget(self.boton_descargar)
+        caja_descarga.addWidget(self.boton_descargar)
+        caja_descarga.addStretch(1)
+        columna.addWidget(self.fila_descarga)
+
+        # Barra de avance: indeterminada mientras el instalador trabaja.
+        self.barra_descarga = QProgressBar()
+        self.barra_descarga.setTextVisible(False)
+        self.barra_descarga.setRange(0, 0)  # ocupado, sin porcentaje conocido
+        self.barra_descarga.setFixedHeight(6)
+        self.barra_descarga.hide()
+        columna.addWidget(self.barra_descarga)
+
+        # Etapa 2: sesión (iniciar/cerrar) y prueba de conexión.
+        self.fila_sesion = QWidget()
+        self.fila_sesion.setObjectName("fila")
+        caja_sesion = QHBoxLayout(self.fila_sesion)
+        caja_sesion.setContentsMargins(0, 0, 0, 0)
+        caja_sesion.setSpacing(8)
         self.boton_login = QPushButton("Iniciar sesión")
         self.boton_login.setCursor(Qt.PointingHandCursor)
         self.boton_login.clicked.connect(self._iniciar_sesion)
-        caja.addWidget(self.boton_login)
-        caja.addStretch(1)
-        columna.addWidget(fila)
-
-        fila_prueba = QWidget()
-        fila_prueba.setObjectName("fila")
-        caja_prueba = QHBoxLayout(fila_prueba)
-        caja_prueba.setContentsMargins(0, 0, 0, 0)
-        caja_prueba.setSpacing(8)
+        caja_sesion.addWidget(self.boton_login)
+        self.boton_logout = QPushButton("Cerrar sesión")
+        self.boton_logout.setCursor(Qt.PointingHandCursor)
+        self.boton_logout.clicked.connect(self._cerrar_sesion)
+        caja_sesion.addWidget(self.boton_logout)
         self.boton_probar = QPushButton("Probar conexión")
         self.boton_probar.setCursor(Qt.PointingHandCursor)
         self.boton_probar.clicked.connect(self._probar)
-        caja_prueba.addWidget(self.boton_probar)
+        caja_sesion.addWidget(self.boton_probar)
         self.resultado_test = QLabel("")
         self.resultado_test.setObjectName("resultado-test")
-        caja_prueba.addWidget(self.resultado_test, 1)
-        columna.addWidget(fila_prueba)
+        caja_sesion.addWidget(self.resultado_test, 1)
+        self.fila_sesion.hide()
+        columna.addWidget(self.fila_sesion)
 
+        # Sondeo del avance de la descarga mientras corre.
+        self._temporizador_descarga = QTimer(self)
+        self._temporizador_descarga.setInterval(500)
+        self._temporizador_descarga.timeout.connect(self._consultar_progreso)
+
+        self._descarga: dict[str, Any] = {"state": "inactivo"}
+        self._sesion: dict[str, Any] = {"logged_in": False}
         return panel
 
     def _suscripcion_ocupado(self, ocupado: bool) -> None:
         self.boton_descargar.setEnabled(not ocupado)
         self.boton_login.setEnabled(not ocupado)
+        self.boton_logout.setEnabled(not ocupado)
         self.boton_probar.setEnabled(not ocupado)
 
-    def _pintar_estado_suscripcion(self) -> None:
+    def _refrescar_suscripcion(self) -> None:
+        """Pide el estado del binario y de la sesión, y pinta la etapa correcta."""
         if self.motor is None or not self._es_suscripcion():
             return
         self.motor.get(
-            "/bimnemo/claude-subscription/status",
-            self._estado_suscripcion,
+            "/bimnemo/claude-subscription/download-progress",
+            self._estado_descarga,
             self._suscripcion_fallo,
         )
 
-    def _estado_suscripcion(self, datos: Any) -> None:
-        if not isinstance(datos, dict):
-            return
-        if datos.get("logged_in"):
-            self.suscripcion_estado.setText(
-                "Sesión de Claude iniciada. Guarda y reinicia para usar tu "
-                "suscripción."
-            )
+    def _estado_descarga(self, datos: Any) -> None:
+        if isinstance(datos, dict):
+            self._descarga = datos
+        self._pintar_etapa()
+        if self._descarga.get("state") == "descargando":
+            self._temporizador_descarga.start()
         else:
-            self.suscripcion_estado.setText(
-                "Aún no hay sesión. Descarga el binario y después inicia sesión."
+            self._temporizador_descarga.stop()
+            if self._descarga.get("state") == "instalado":
+                self.motor.get(
+                    "/bimnemo/claude-subscription/status",
+                    self._estado_sesion,
+                    self._suscripcion_fallo,
+                )
+
+    def _consultar_progreso(self) -> None:
+        self.motor.get(
+            "/bimnemo/claude-subscription/download-progress",
+            self._estado_descarga,
+            self._suscripcion_fallo,
+        )
+
+    def _estado_sesion(self, datos: Any) -> None:
+        if isinstance(datos, dict):
+            self._sesion = datos
+        self._pintar_etapa()
+
+    def _pintar_etapa(self) -> None:
+        estado = self._descarga.get("state", "inactivo")
+        if estado == "descargando":
+            self.fila_descarga.hide()
+            self.barra_descarga.show()
+            self.descarga_estado.setText("Descargando Claude Code…")
+            self.fila_sesion.hide()
+        elif estado == "error":
+            self.barra_descarga.hide()
+            self.descarga_estado.setText(
+                self._descarga.get("message") or "La descarga falló."
             )
+            self.fila_descarga.show()
+            self.fila_sesion.hide()
+        elif estado == "instalado":
+            self.barra_descarga.hide()
+            self.fila_descarga.hide()
+            self.descarga_estado.clear()
+            self.fila_sesion.show()
+            self._pintar_sesion()
+        else:  # inactivo: no hay binario todavía
+            self.barra_descarga.hide()
+            self.fila_descarga.show()
+            self.descarga_estado.setText(
+                "Descarga el binario de Claude Code para usar tu suscripción."
+            )
+            self.fila_sesion.hide()
+
+    def _pintar_sesion(self) -> None:
+        iniciado = bool(self._sesion.get("logged_in"))
+        self.boton_login.setEnabled(not iniciado)
+        self.boton_logout.setEnabled(iniciado)
+        self.descarga_estado.setText(
+            "Sesión de Claude iniciada. Guarda y reinicia para usar tu suscripción."
+            if iniciado
+            else "Binario instalado. Inicia sesión con tu cuenta de Claude."
+        )
 
     def _descargar(self) -> None:
         if self.motor is None:
             return
-        self._suscripcion_ocupado(True)
-        self.suscripcion_estado.setText("Descargando el binario de Claude Code…")
+        self.descarga_estado.setText("Descargando Claude Code…")
         self.motor.post(
             "/bimnemo/claude-subscription/download",
             {},
-            self._descargado,
+            self._estado_descarga,
             self._suscripcion_fallo,
         )
-
-    def _descargado(self, datos: Any) -> None:
-        self._suscripcion_ocupado(False)
-        if isinstance(datos, dict) and datos.get("ok"):
-            self.suscripcion_estado.setText("Binario instalado. Ahora inicia sesión.")
-        else:
-            self._suscripcion_fallo(
-                (datos or {}).get("message")
-                if isinstance(datos, dict)
-                else "No se pudo descargar."
-            )
-        self._pintar_estado_suscripcion()
 
     def _iniciar_sesion(self) -> None:
         if self.motor is None:
             return
         self._suscripcion_ocupado(True)
-        self.suscripcion_estado.setText(
-            "Abre tu navegador y termina el inicio de sesión…"
-        )
+        self.descarga_estado.setText("Abre tu navegador y termina el inicio de sesión…")
         self.motor.post(
             "/bimnemo/claude-subscription/login",
             {},
-            self._sesion_iniciada,
+            self._sesion_cambiada,
             self._suscripcion_fallo,
         )
 
-    def _sesion_iniciada(self, datos: Any) -> None:
+    def _cerrar_sesion(self) -> None:
+        if self.motor is None:
+            return
+        self._suscripcion_ocupado(True)
+        self.descarga_estado.setText("Cerrando la sesión…")
+        self.motor.post(
+            "/bimnemo/claude-subscription/logout",
+            {},
+            self._sesion_cambiada,
+            self._suscripcion_fallo,
+        )
+
+    def _sesion_cambiada(self, datos: Any) -> None:
         self._suscripcion_ocupado(False)
-        if isinstance(datos, dict) and datos.get("ok"):
-            self.suscripcion_estado.setText(
-                "Sesión de Claude iniciada. Guarda y reinicia para usar tu "
-                "suscripción."
-            )
-        else:
-            self._suscripcion_fallo(
-                (datos or {}).get("message")
-                if isinstance(datos, dict)
-                else "No se pudo iniciar sesión."
-            )
-        self._pintar_estado_suscripcion()
+        self.motor.get(
+            "/bimnemo/claude-subscription/status",
+            self._estado_sesion,
+            self._suscripcion_fallo,
+        )
 
     def _probar(self) -> None:
         if self.motor is None:
@@ -523,7 +587,8 @@ class Seccion(QWidget):
 
     def _suscripcion_fallo(self, motivo: str) -> None:
         self._suscripcion_ocupado(False)
-        self.suscripcion_estado.setText(motivo or "Error al conectar con la suscripción.")
+        self._temporizador_descarga.stop()
+        self.descarga_estado.setText(motivo or "Error al conectar con la suscripción.")
         self.resultado_test.setText("● Sin conexión")
         self.resultado_test.setStyleSheet("color: #dc2626; font-weight: 700;")
 
