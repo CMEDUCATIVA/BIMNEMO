@@ -537,6 +537,15 @@ def create_bimnemo_settings_routes(
         """Informa del avance de la instalación para la barra de la ventana."""
         return suscripcion_claude.progreso_descarga()
 
+    @router.delete(
+        "/claude-subscription/download",
+        dependencies=[Depends(combined_auth)],
+        summary="Eliminar el binario de Claude Code",
+    )
+    async def claude_subscription_delete() -> dict[str, Any]:
+        """Borra el binario instalado para poder descargarlo de nuevo."""
+        return await asyncio.to_thread(suscripcion_claude.eliminar_binario)
+
     @router.post(
         "/restart",
         response_model=RestartResponse,

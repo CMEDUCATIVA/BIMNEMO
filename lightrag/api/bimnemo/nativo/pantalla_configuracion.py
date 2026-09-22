@@ -384,7 +384,7 @@ class Seccion(QWidget):
         self.descarga_estado.setWordWrap(True)
         columna.addWidget(self.descarga_estado)
 
-        # Etapa 1: descargar el binario.
+        # Etapa 1: descargar el binario (con papelera para reinstalar).
         self.fila_descarga = QWidget()
         self.fila_descarga.setObjectName("fila")
         caja_descarga = QHBoxLayout(self.fila_descarga)
@@ -394,6 +394,12 @@ class Seccion(QWidget):
         self.boton_descargar.setCursor(Qt.PointingHandCursor)
         self.boton_descargar.clicked.connect(self._descargar)
         caja_descarga.addWidget(self.boton_descargar)
+        self.boton_borrar = QPushButton("🗑")
+        self.boton_borrar.setCursor(Qt.PointingHandCursor)
+        self.boton_borrar.setToolTip("Eliminar el binario para descargarlo de nuevo")
+        self.boton_borrar.setFixedWidth(40)
+        self.boton_borrar.clicked.connect(self._borrar_binario)
+        caja_descarga.addWidget(self.boton_borrar)
         caja_descarga.addStretch(1)
         columna.addWidget(self.fila_descarga)
 
@@ -405,10 +411,10 @@ class Seccion(QWidget):
         self.barra_descarga.hide()
         columna.addWidget(self.barra_descarga)
 
-        # Etapa 2: sesión (iniciar/cerrar) y prueba de conexión.
+        # Etapa 2: un botón por fila — sesión y prueba de conexión.
         self.fila_sesion = QWidget()
-        self.fila_sesion.setObjectName("fila")
-        caja_sesion = QHBoxLayout(self.fila_sesion)
+        self.fila_sesion.setObjectName("fila-sesion")
+        caja_sesion = QVBoxLayout(self.fila_sesion)
         caja_sesion.setContentsMargins(0, 0, 0, 0)
         caja_sesion.setSpacing(8)
         self.boton_login = QPushButton("Iniciar sesión")
@@ -419,13 +425,20 @@ class Seccion(QWidget):
         self.boton_logout.setCursor(Qt.PointingHandCursor)
         self.boton_logout.clicked.connect(self._cerrar_sesion)
         caja_sesion.addWidget(self.boton_logout)
+
+        fila_probar = QWidget()
+        fila_probar.setObjectName("fila")
+        caja_probar = QHBoxLayout(fila_probar)
+        caja_probar.setContentsMargins(0, 0, 0, 0)
+        caja_probar.setSpacing(8)
         self.boton_probar = QPushButton("Probar conexión")
         self.boton_probar.setCursor(Qt.PointingHandCursor)
         self.boton_probar.clicked.connect(self._probar)
-        caja_sesion.addWidget(self.boton_probar)
+        caja_probar.addWidget(self.boton_probar)
         self.resultado_test = QLabel("")
         self.resultado_test.setObjectName("resultado-test")
-        caja_sesion.addWidget(self.resultado_test, 1)
+        caja_probar.addWidget(self.resultado_test, 1)
+        caja_sesion.addWidget(fila_probar)
         self.fila_sesion.hide()
         columna.addWidget(self.fila_sesion)
 
@@ -440,6 +453,7 @@ class Seccion(QWidget):
 
     def _suscripcion_ocupado(self, ocupado: bool) -> None:
         self.boton_descargar.setEnabled(not ocupado)
+        self.boton_borrar.setEnabled(not ocupado)
         self.boton_login.setEnabled(not ocupado)
         self.boton_logout.setEnabled(not ocupado)
         self.boton_probar.setEnabled(not ocupado)
@@ -529,6 +543,27 @@ class Seccion(QWidget):
             self._estado_descarga,
             self._suscripcion_fallo,
         )
+
+    def _borrar_binario(self) -> None:
+        """Elimina el binario para poder descargarlo de nuevo."""
+        if self.motor is None:
+            return
+        self._suscripcion_ocupado(True)
+        self.descarga_estado.setText("Eliminando el binario de Claude Code…")
+        self.motor.borrar(
+            "/bimnemo/claude-subscription/download",
+            {},
+            self._binario_borrado,
+            self._suscripcion_fallo,
+        )
+
+    def _binario_borrado(self, datos: Any) -> None:
+        self._suscripcion_ocupado(False)
+        self.resultado_test.clear()
+        self.resultado_test.setStyleSheet("")
+        self._descarga = {"state": "inactivo", "message": ""}
+        self._sesion = {"logged_in": False}
+        self._refrescar_suscripcion()
 
     def _iniciar_sesion(self) -> None:
         if self.motor is None:

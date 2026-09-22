@@ -8,12 +8,17 @@ lo que necesita para el modo «por suscripción»:
 * **estado** — si hay una sesión iniciada (CLI o fichero de credenciales).
 * **iniciar_sesion / cerrar_sesion** — login y logout OAuth oficiales.
 * **probar** — petición real, sin herramientas, para comprobar la suscripción.
-* **iniciar_descarga / progreso_descarga** — instalar el binario en segundo
-  plano e informar del avance para la barra de la ventana.
+* **iniciar_descarga / progreso_descarga / eliminar_binario** — instalar el
+  binario en segundo plano, informar del avance y borrarlo para reinstalar.
 
 La descarga corre en un hilo aparte y expone su estado en
 :func:`progreso_descarga`; así la ventana enseña una barra de avance y cambia
 de etapa cuando termina, sin bloquearse.
+
+Todos los subprocesos se lanzan **sin ventana de consola** en Windows
+(``CREATE_NO_WINDOW``) y con un ``cwd`` temporal propio, para que BIMNEMO, que
+corre sin consola, no abra una terminal negra ni dependa del directorio ni del
+«trust» del repositorio.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -50,6 +56,9 @@ TOKEN_OAUTH = re.compile(r"sk-ant-oat[\w-]+")
 
 #: ANSI/emojis de la salida del CLI no aportan nada a un aviso de la ventana.
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+#: Flag de Windows que evita que el subproceso abra una ventana de consola.
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 def _candidatos() -> list[Path]:
@@ -108,7 +117,12 @@ def _limpiar(texto: str) -> str:
 
 
 def _ejecutar(orden: list[str], timeout: float) -> tuple[int, str, str]:
-    """Ejecuta un comando y devuelve ``(código, stdout, stderr)``."""
+    """Ejecuta un comando sin consola y con un ``cwd`` temporal propio.
+
+    El ``cwd`` a una carpeta temporal evita dos cosas: que Claude Code vea el
+    directorio del motor (y pida «trust» por su ``.claude.json``) y que la
+    ejecución dependa de dónde arrancó BIMNEMO.
+    """
     try:
         resultado = subprocess.run(
             orden,
@@ -116,6 +130,8 @@ def _ejecutar(orden: list[str], timeout: float) -> tuple[int, str, str]:
             timeout=timeout,
             shell=False,
             check=False,
+            cwd=tempfile.gettempdir(),
+            creationflags=_CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except FileNotFoundError:
         return -1, "", "claude-cli-no-encontrado"
@@ -226,7 +242,7 @@ def probar() -> dict[str, Any]:
     }
 
 
-# -- descarga en segundo plano ----------------------------------------------
+# -- descarga e instalación del binario --------------------------------------
 
 #: Estado de la descarga. ``state`` ∈ inactivo | descargando | instalado | error.
 _descarga: dict[str, str] = {"state": "inactivo", "message": ""}
@@ -287,10 +303,44 @@ def progreso_descarga() -> dict[str, Any]:
     return dict(_descarga)
 
 
+def eliminar_binario() -> dict[str, Any]:
+    """Borra el binario de Claude Code para poder descargarlo de nuevo.
+
+    Solo se quitan las ubicaciones gestionadas (no un ``claude`` instalado por
+    el administrador del sistema en otro sitio); si no hay nada que borrar, se
+    responde igual de bien. Tras borrar, el estado vuelve a «inactivo».
+    """
+    global _descarga
+    quitados = 0
+    for candidato in _candidatos():
+        try:
+            if candidato.is_file():
+                candidato.unlink()
+                quitados += 1
+        except OSError as exc:
+            logger.warning("BIMNEMO: no se pudo borrar %s: %s", candidato, exc)
+
+    # El binario en el PATH (instalado por el usuario) también se intenta.
+    del_path = shutil.which("claude")
+    if del_path and Path(del_path) not in _candidatos():
+        try:
+            Path(del_path).unlink()
+            quitados += 1
+        except OSError as exc:
+            logger.warning("BIMNEMO: no se pudo borrar %s: %s", del_path, exc)
+
+    if _hay_binario():
+        return {"ok": False, "message": "No se pudo eliminar el binario del todo."}
+
+    _descarga = {"state": "inactivo", "message": ""}
+    return {"ok": True, "message": "", "removed": quitados}
+
+
 __all__ = [
     "binario",
     "cerrar_sesion",
     "credenciales",
+    "eliminar_binario",
     "estado",
     "iniciar_descarga",
     "iniciar_sesion",
