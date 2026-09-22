@@ -18,6 +18,7 @@ from typing import Any, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -299,6 +301,129 @@ class Seccion(QWidget):
         return datos
 
 
+class AvisoPeligro(QDialog):
+    """Un aviso de los que rompen algo: en rojo, y con la salida segura delante.
+
+    No es un ``QMessageBox`` porque ése pinta el triángulo amarillo de
+    Windows y dos botones iguales, y aquí los botones no pesan lo mismo:
+    «No continuar» es lo que conviene casi siempre, así que va en rojo
+    lleno, es el botón por defecto (Intro) y el que tiene el foco. Seguir
+    adelante queda discreto, con un nombre que dice lo que es.
+    """
+
+    # Con {titulo} y {discreto} según el tema: el rojo claro que se lee bien
+    # sobre fondo oscuro se pierde sobre blanco, y al revés.
+    ESTILO = """
+        #banda {{
+            background: rgba(220, 38, 38, 0.13);
+            border-left: 4px solid #dc2626;
+            border-radius: 6px;
+        }}
+        #banda-icono {{
+            background: #dc2626;
+            color: #ffffff;
+            border-radius: 13px;
+            font-size: 16px;
+            font-weight: 800;
+        }}
+        #banda-titulo {{ color: {titulo}; font-size: 15px; font-weight: 700; }}
+        #aviso-texto {{ font-size: 13px; }}
+        QPushButton#parar {{
+            background: #dc2626;
+            border: 1px solid #dc2626;
+            color: #ffffff;
+            font-weight: 700;
+            padding: 8px 18px;
+        }}
+        QPushButton#parar:hover {{ background: #b91c1c; border-color: #b91c1c; }}
+        QPushButton#parar:focus {{ border: 2px solid #fca5a5; }}
+        QPushButton#seguir {{
+            background: transparent;
+            border: 1px solid {discreto_borde};
+            color: {discreto};
+            padding: 8px 14px;
+        }}
+        QPushButton#seguir:hover {{ color: {discreto_hover}; }}
+    """
+
+    def __init__(
+        self,
+        padre: Optional[QWidget],
+        titulo: str,
+        cabecera: str,
+        texto: str,
+        parar: str = "No continuar",
+        seguir: str = "Continuar de todos modos",
+    ) -> None:
+        super().__init__(padre)
+        self.setWindowTitle(titulo)
+        from lightrag.api.bimnemo.nativo import tema
+
+        oscuro = tema.ACTUAL is tema.OSCURO
+        self.setStyleSheet(
+            self.ESTILO.format(
+                titulo="#f87171" if oscuro else "#b91c1c",
+                discreto="#94a3b8" if oscuro else "#475569",
+                discreto_borde="rgba(148, 163, 184, 0.35)" if oscuro else "#cbd5e1",
+                discreto_hover="#e2e8f0" if oscuro else "#0f172a",
+            )
+        )
+        self.setMinimumWidth(520)
+        self.continuar = False
+
+        columna = QVBoxLayout(self)
+        columna.setContentsMargins(22, 20, 22, 18)
+        columna.setSpacing(16)
+
+        banda = QWidget()
+        banda.setObjectName("banda")
+        banda.setAttribute(Qt.WA_StyledBackground, True)
+        banda.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        fila = QHBoxLayout(banda)
+        fila.setContentsMargins(14, 10, 14, 10)
+        fila.setSpacing(12)
+        # Un «!» en un círculo rojo dibujado, y no el ⚠ del sistema: Windows
+        # lo pinta como emoji amarillo y se come el rojo del aviso.
+        icono = QLabel("!")
+        icono.setObjectName("banda-icono")
+        icono.setAlignment(Qt.AlignCenter)
+        icono.setFixedSize(26, 26)
+        fila.addWidget(icono)
+        rotulo = QLabel(cabecera)
+        rotulo.setObjectName("banda-titulo")
+        rotulo.setWordWrap(True)
+        fila.addWidget(rotulo, 1)
+        columna.addWidget(banda)
+
+        cuerpo = QLabel(texto)
+        cuerpo.setObjectName("aviso-texto")
+        cuerpo.setTextFormat(Qt.RichText)
+        cuerpo.setWordWrap(True)
+        columna.addWidget(cuerpo)
+
+        botones = QHBoxLayout()
+        botones.setSpacing(10)
+        botones.addStretch(1)
+        self.boton_seguir = QPushButton(seguir)
+        self.boton_seguir.setObjectName("seguir")
+        self.boton_seguir.setCursor(Qt.PointingHandCursor)
+        self.boton_seguir.setAutoDefault(False)
+        self.boton_seguir.clicked.connect(self._seguir)
+        botones.addWidget(self.boton_seguir)
+        self.boton_parar = QPushButton(parar)
+        self.boton_parar.setObjectName("parar")
+        self.boton_parar.setCursor(Qt.PointingHandCursor)
+        self.boton_parar.setDefault(True)
+        self.boton_parar.clicked.connect(self.reject)
+        botones.addWidget(self.boton_parar)
+        columna.addLayout(botones)
+        self.boton_parar.setFocus()
+
+    def _seguir(self) -> None:
+        self.continuar = True
+        self.accept()
+
+
 class PantallaConfiguracion(Pantalla):
     def __init__(self, motor: Motor) -> None:
         super().__init__(
@@ -484,16 +609,12 @@ class PantallaConfiguracion(Pantalla):
         return modelo, nuevo["model"] or nuevo["provider"]
 
     def preguntar(self, titulo: str, texto: str) -> bool:
-        """«Continuar» o «No continuar». Devuelve si eligió continuar."""
-        caja = QMessageBox(self)
-        caja.setIcon(QMessageBox.Warning)
-        caja.setWindowTitle(titulo)
-        caja.setText(texto)
-        seguir = caja.addButton("Continuar", QMessageBox.AcceptRole)
-        parar = caja.addButton("No continuar", QMessageBox.RejectRole)
-        caja.setDefaultButton(parar)
-        caja.exec()
-        return caja.clickedButton() is seguir
+        """Aviso en rojo: «No continuar» o seguir. Devuelve si eligió seguir."""
+        aviso = AvisoPeligro(
+            self, titulo, "Tus memorias dejarán de abrirse", texto
+        )
+        aviso.exec()
+        return aviso.continuar
 
     def _confirmar_cambio_de_embedding(self) -> bool:
         """Avisa de que el embedding elegido no casa con las memorias.
@@ -511,13 +632,14 @@ class PantallaConfiguracion(Pantalla):
         actual, nuevo = cambio
         self._cambio_aceptado = self.preguntar(
             "Cambiar el modelo de embeddings",
-            f"Tus memorias ya tienen grafos hechos con «{actual}». Los vectores "
-            f"de un modelo no sirven para otro: con «{nuevo}», al reiniciar el "
-            "motor no podrá abrirlas.\n\n"
+            f"Tus memorias ya tienen grafos hechos con <b>«{actual}»</b>. Los "
+            f"vectores de un modelo no sirven para otro: con <b>«{nuevo}»</b>, "
+            "al reiniciar, el motor <b>no podrá abrirlas</b>.<br><br>"
             "Para usarlo habría que reconstruir los índices, lo que vuelve a "
             "enviar todo el texto al proveedor nuevo (gasta saldo). Si BIMNEMO "
-            f"no arranca, te ofrecerá volver a «{actual}».\n\n"
-            "¿Quieres continuar?",
+            f"no arranca, te ofrecerá volver a «{actual}».<br><br>"
+            "Si no estás seguro, pulsa <b>No continuar</b>: todo se queda "
+            "como está.",
         )
         return self._cambio_aceptado
 

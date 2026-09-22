@@ -297,3 +297,21 @@ def test_sin_memorias_o_sin_cambiarlo_no_pregunta(configuracion):
     _con_memorias_de_openai(configuracion, hay_vectores=False)
     _elegir_gemini(configuracion)
     assert configuracion.cambio_de_embedding() is None
+
+
+def test_el_aviso_empuja_a_no_continuar(aplicacion):
+    """«No continuar» es el botón por defecto (Intro) y el rojo lleno."""
+    from lightrag.api.bimnemo.nativo.pantalla_configuracion import AvisoPeligro
+
+    aviso = AvisoPeligro(None, "t", "cabecera", "texto")
+    assert aviso.boton_parar.isDefault()
+    assert aviso.boton_parar.objectName() == "parar"
+    assert aviso.boton_parar.text() == "No continuar"
+    assert not aviso.boton_seguir.isDefault()
+
+    aviso.boton_parar.click()
+    assert aviso.continuar is False
+
+    otro = AvisoPeligro(None, "t", "cabecera", "texto")
+    otro.boton_seguir.click()
+    assert otro.continuar is True
