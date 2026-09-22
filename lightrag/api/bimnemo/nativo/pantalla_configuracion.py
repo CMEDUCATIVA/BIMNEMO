@@ -384,7 +384,7 @@ class Seccion(QWidget):
         self.descarga_estado.setWordWrap(True)
         columna.addWidget(self.descarga_estado)
 
-        # Etapa 1: descargar el binario (con papelera para reinstalar).
+        # Etapa 1: descargar el binario al inicio; desinstalar al final.
         self.fila_descarga = QWidget()
         self.fila_descarga.setObjectName("fila")
         caja_descarga = QHBoxLayout(self.fila_descarga)
@@ -394,13 +394,12 @@ class Seccion(QWidget):
         self.boton_descargar.setCursor(Qt.PointingHandCursor)
         self.boton_descargar.clicked.connect(self._descargar)
         caja_descarga.addWidget(self.boton_descargar)
-        self.boton_borrar = QPushButton("🗑")
+        caja_descarga.addStretch(1)
+        self.boton_borrar = QPushButton("Desinstalar")
         self.boton_borrar.setCursor(Qt.PointingHandCursor)
-        self.boton_borrar.setToolTip("Eliminar el binario para descargarlo de nuevo")
-        self.boton_borrar.setFixedWidth(40)
+        self.boton_borrar.setToolTip("Eliminar el binario de Claude Code")
         self.boton_borrar.clicked.connect(self._borrar_binario)
         caja_descarga.addWidget(self.boton_borrar)
-        caja_descarga.addStretch(1)
         columna.addWidget(self.fila_descarga)
 
         # Barra de avance: indeterminada mientras el instalador trabaja.
@@ -411,7 +410,8 @@ class Seccion(QWidget):
         self.barra_descarga.hide()
         columna.addWidget(self.barra_descarga)
 
-        # Etapa 2: un botón por fila — sesión y prueba de conexión.
+        # Etapa 2: un botón por fila. La prueba ocupa todo el ancho y su
+        # resultado (verde/rojo) se pinta en el propio texto del botón.
         self.fila_sesion = QWidget()
         self.fila_sesion.setObjectName("fila-sesion")
         caja_sesion = QVBoxLayout(self.fila_sesion)
@@ -425,20 +425,10 @@ class Seccion(QWidget):
         self.boton_logout.setCursor(Qt.PointingHandCursor)
         self.boton_logout.clicked.connect(self._cerrar_sesion)
         caja_sesion.addWidget(self.boton_logout)
-
-        fila_probar = QWidget()
-        fila_probar.setObjectName("fila")
-        caja_probar = QHBoxLayout(fila_probar)
-        caja_probar.setContentsMargins(0, 0, 0, 0)
-        caja_probar.setSpacing(8)
         self.boton_probar = QPushButton("Probar conexión")
         self.boton_probar.setCursor(Qt.PointingHandCursor)
         self.boton_probar.clicked.connect(self._probar)
-        caja_probar.addWidget(self.boton_probar)
-        self.resultado_test = QLabel("")
-        self.resultado_test.setObjectName("resultado-test")
-        caja_probar.addWidget(self.resultado_test, 1)
-        caja_sesion.addWidget(fila_probar)
+        caja_sesion.addWidget(self.boton_probar)
         self.fila_sesion.hide()
         columna.addWidget(self.fila_sesion)
 
@@ -559,8 +549,6 @@ class Seccion(QWidget):
 
     def _binario_borrado(self, datos: Any) -> None:
         self._suscripcion_ocupado(False)
-        self.resultado_test.clear()
-        self.resultado_test.setStyleSheet("")
         self._descarga = {"state": "inactivo", "message": ""}
         self._sesion = {"logged_in": False}
         self._refrescar_suscripcion()
@@ -601,8 +589,8 @@ class Seccion(QWidget):
         if self.motor is None:
             return
         self._suscripcion_ocupado(True)
-        self.resultado_test.setText("Probando…")
-        self.resultado_test.setStyleSheet("")
+        self.boton_probar.setText("Probando…")
+        self.boton_probar.setStyleSheet("")
         self.motor.post(
             "/bimnemo/claude-subscription/probe",
             {},
@@ -614,18 +602,18 @@ class Seccion(QWidget):
         self._suscripcion_ocupado(False)
         bien = isinstance(datos, dict) and bool(datos.get("ok"))
         if bien:
-            self.resultado_test.setText("● Conectado")
-            self.resultado_test.setStyleSheet("color: #16a34a; font-weight: 700;")
+            self.boton_probar.setText("● Conectado")
+            self.boton_probar.setStyleSheet("color: #16a34a; font-weight: 700;")
         else:
-            self.resultado_test.setText("● Sin conexión")
-            self.resultado_test.setStyleSheet("color: #dc2626; font-weight: 700;")
+            self.boton_probar.setText("● Sin conexión")
+            self.boton_probar.setStyleSheet("color: #dc2626; font-weight: 700;")
 
     def _suscripcion_fallo(self, motivo: str) -> None:
         self._suscripcion_ocupado(False)
         self._temporizador_descarga.stop()
         self.descarga_estado.setText(motivo or "Error al conectar con la suscripción.")
-        self.resultado_test.setText("● Sin conexión")
-        self.resultado_test.setStyleSheet("color: #dc2626; font-weight: 700;")
+        self.boton_probar.setText("● Sin conexión")
+        self.boton_probar.setStyleSheet("color: #dc2626; font-weight: 700;")
 
     # -- guardado -----------------------------------------------------------
 
