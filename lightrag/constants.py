@@ -13,7 +13,12 @@ DEFAULT_WOKERS = 2
 DEFAULT_MAX_GRAPH_NODES = 1000
 
 # Default values for extraction settings
-DEFAULT_SUMMARY_LANGUAGE = "English"  # Default language for document processing
+# BIMNEMO: Spanish, not English. This is a Spanish product; a memory that
+# silently extracted its entities in English because SUMMARY_LANGUAGE was
+# missing would have to be emptied and re-indexed to fix — the language of
+# what is already stored cannot be changed afterwards. The shipped
+# `env.example` sets it too; this is the floor for an install that lost it.
+DEFAULT_SUMMARY_LANGUAGE = "Spanish"  # Default language for document processing
 DEFAULT_MAX_GLEANING = 1
 DEFAULT_ENTITY_NAME_MAX_LENGTH = 256
 # Max UTF-8 byte length for entity identifiers. Milvus enforces VARCHAR

@@ -86,7 +86,8 @@ async def test_claude_code_semaforo():
     async def mock_create_subprocess_exec(*args, **kwargs):
         proc = AsyncMock()
 
-        async def mock_communicate():
+        # El prompt viaja por stdin: `communicate` recibe los bytes.
+        async def mock_communicate(entrada=None):
             nonlocal max_concurrent
             active_processes.append(1)
             max_concurrent = max(max_concurrent, len(active_processes))
@@ -108,3 +109,57 @@ async def test_claude_code_semaforo():
 
     # Con el semáforo, máximo debe ser 1 proceso a la vez
     assert max_concurrent == 1, f"Expected max 1 concurrent, got {max_concurrent}"
+
+
+@pytest.mark.asyncio
+async def test_un_contexto_grande_no_se_pasa_por_la_linea_de_ordenes():
+    """Windows corta la orden en 32.767 caracteres; un RAG los pasa fácil.
+
+    Y lo peor no era que fallara: `CreateProcess` manda WinError 206, que
+    Python convierte en `FileNotFoundError`, y el binding lo contaba como
+    «No se encontró el binario de Claude Code» **teniéndolo instalado y con
+    sesión abierta**. Preguntar a varias memorias a la vez daba error 500 y
+    la pista apuntaba al sitio equivocado.
+    """
+    from lightrag.llm.claude_code import claude_code_complete_if_cache
+
+    contexto = "Fragmento de normativa. " * 4000  # ~96.000 caracteres
+    visto = {}
+
+    async def mock_create_subprocess_exec(*args, **kwargs):
+        visto["orden"] = args
+        proc = AsyncMock()
+
+        async def communicate(entrada=None):
+            visto["stdin"] = entrada
+            return (b"respuesta", b"")
+
+        proc.communicate = communicate
+        proc.returncode = 0
+        return proc
+
+    with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess_exec):
+        await claude_code_complete_if_cache("claude-opus-5", contexto)
+
+    orden = visto["orden"]
+    assert sum(len(str(a)) for a in orden) < 1000, "la orden va corta"
+    assert not any(contexto[:100] in str(a) for a in orden), "el prompt NO va ahí"
+    assert contexto.encode("utf-8") in visto["stdin"], "va por la entrada estándar"
+
+
+@pytest.mark.asyncio
+async def test_una_orden_demasiado_larga_ya_no_se_lee_como_binario_ausente():
+    """Si vuelve a pasar, que la pista no mande a reinstalar Claude."""
+    from lightrag.llm.claude_code import claude_code_complete_if_cache
+
+    def demasiado_larga(*_a, **_k):
+        error = FileNotFoundError("demasiado largo")
+        error.winerror = 206
+        raise error
+
+    with patch("asyncio.create_subprocess_exec", side_effect=demasiado_larga):
+        with pytest.raises(RuntimeError) as fallo:
+            await claude_code_complete_if_cache("claude-opus-5", "hola")
+
+    assert "demasiado larga" in str(fallo.value)
+    assert "No se encontró el binario" not in str(fallo.value)

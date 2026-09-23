@@ -568,12 +568,17 @@ class PantallaConfiguracion(Pantalla):
         embedding.proveedor.activated.connect(self._embedding_elegido)
         embedding.modelo.activated.connect(self._embedding_elegido)
 
-        # De dos en dos, como en la web. La de acciones sí va entera, debajo:
-        # afecta a todas.
+        # «Guardar» y «Reiniciar motor» van ARRIBA, antes de las tarjetas.
+        # Esta pantalla ha crecido —modelo, embeddings, reordenado, idioma, la
+        # suscripción de Claude— y con los botones al final había que bajar
+        # hasta el fondo para guardar un cambio hecho en lo primero que se ve.
+        # Arriba están siempre a mano, y el aviso de lo que pasó también.
+        self.anadir(self._acciones())
+
+        # De dos en dos, como en la web. La de acciones va entera: afecta a
+        # todas.
         self.rejilla = RejillaTarjetas([*self.secciones.values(), self._idioma()])
         self.anadir(self.rejilla)
-
-        self.anadir(self._acciones())
         self.cerrar_con_espacio()
 
         self.refrescar()

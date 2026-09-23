@@ -39,6 +39,7 @@ from lightrag.api.bimnemo.envfile import (
 from lightrag.api.bimnemo.providers import catalog_payload, find, match_provider
 from lightrag.api.bimnemo.runtime import (
     CONFIGURABLE_ENV_KEYS,
+    IDIOMA_POR_DEFECTO,
 )
 from lightrag.api.bimnemo.runtime import (
     RESTART_EXIT_CODE as _RESTART_EXIT_CODE,
@@ -610,7 +611,11 @@ _SECTION_PREFIX = {"llm": "LLM", "embedding": "EMBEDDING", "rerank": "RERANK"}
 #: Lo que usa el motor cuando ``SUMMARY_LANGUAGE`` no está puesto. Se enseña
 #: tal cual para que la pantalla nunca aparezca vacía diciendo otra cosa que
 #: lo que de verdad va a pasar al indexar.
-DEFAULT_LANGUAGE = "English"
+#:
+#: Sale de ``runtime`` y no está escrito aquí a mano: si la pantalla dijera un
+#: idioma y el motor extrajera en otro, el usuario no se enteraría hasta ver
+#: las entidades — y entonces ya habría que reindexar.
+DEFAULT_LANGUAGE = IDIOMA_POR_DEFECTO
 
 
 def _env_path() -> Path:

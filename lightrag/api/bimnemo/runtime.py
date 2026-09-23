@@ -19,6 +19,15 @@ Mientras aquí no haya un solo ``import`` de LightRAG, eso no puede repetirse.
 
 from __future__ import annotations
 
+#: El idioma en que se extrae y se responde cuando nadie ha dicho otra cosa.
+#:
+#: BIMNEMO es un producto en español, así que su suelo es el español y no el
+#: inglés de LightRAG. Importa más que otros ajustes: el idioma con el que se
+#: extrajo una entidad **no se puede cambiar después**; para unificarlo hay
+#: que vaciar la memoria y volver a indexarla. Un inglés silencioso por una
+#: variable que falta se paga entero.
+IDIOMA_POR_DEFECTO = "Spanish"
+
 #: Con este código de salida el motor le pide al supervisor que lo levante de
 #: nuevo. Un número alto y poco común, para no chocar con los que usan el
 #: intérprete o el sistema.

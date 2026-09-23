@@ -31,6 +31,7 @@ from pathlib import Path
 
 from lightrag.api.bimnemo.runtime import (
     CONFIGURABLE_ENV_KEYS,
+    IDIOMA_POR_DEFECTO,
     RESTART_EXIT_CODE,
 )
 
@@ -380,7 +381,10 @@ def asegurar_env() -> None:
             env.write_text(
                 "# Creado por BIMNEMO en el primer arranque.\n"
                 "HOST=127.0.0.1\n"
-                "PORT=9621\n",
+                "PORT=9621\n"
+                # El idioma va aquí aunque este fichero sea el mínimo: es el
+                # único ajuste que no se arregla después sin reindexar.
+                f"SUMMARY_LANGUAGE={IDIOMA_POR_DEFECTO}\n",
                 encoding="utf-8",
             )
     except OSError as exc:

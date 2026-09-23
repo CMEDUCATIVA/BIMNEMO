@@ -12,6 +12,12 @@ El binario se resuelve así, en orden:
 
 1. ``CLAUDE_CODE_BIN`` si está en el entorno (ruta explícita).
 2. ``claude`` en el ``PATH``.
+3. Los sitios del instalador oficial (``~/.local/bin``, ``~/.claude/local``),
+   porque el PATH del motor no cambia mientras corre.
+
+**El prompt viaja por la entrada estándar**, no como argumento: Windows corta
+la línea de órdenes en 32.767 caracteres, que un contexto de RAG supera sin
+esfuerzo. Ver el comentario en :func:`claude_code_complete_if_cache`.
 
 Los mensajes de error incluyen el estado del proceso y la salida de Claude
 Code, acotada, para que un modelo mal escrito o una sesión caducada se puedan
@@ -137,10 +143,20 @@ async def claude_code_complete_if_cache(
     binario = _binario()
     texto = _armar_prompt(prompt, system_prompt, history_messages)
 
+    # El prompt va por la ENTRADA ESTÁNDAR, no como argumento.
+    #
+    # Windows limita la línea de órdenes a 32.767 caracteres. Un contexto de
+    # RAG lo pasa sin esfuerzo —basta con preguntar a varias memorias a la
+    # vez— y entonces `CreateProcess` falla con WinError 206, que Python
+    # convierte en `FileNotFoundError`: el mismo error que si no estuviera el
+    # binario. Por eso el fallo se leía como «no se encontró Claude Code»
+    # teniéndolo instalado y con sesión abierta.
+    #
+    # `claude -p` sin prompt lee de stdin, que es como se le pasa un fichero
+    # entero desde la consola. Sin límite práctico.
     orden = [
         binario,
         "-p",
-        texto,
         "--output-format",
         "text",
         "--max-turns",
@@ -161,11 +177,21 @@ async def claude_code_complete_if_cache(
         try:
             proceso = await asyncio.create_subprocess_exec(
                 *orden,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 creationflags=creationflags,
             )
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
+            # Windows manda WinError 206 —línea de órdenes demasiado larga—
+            # como `FileNotFoundError`. Ya no debería pasar, con el prompt por
+            # stdin, pero si vuelve a pasar que no se diga que falta el
+            # binario: es la pista equivocada y cuesta horas.
+            if getattr(exc, "winerror", None) == 206:
+                raise RuntimeError(
+                    "La orden para Claude Code salió demasiado larga para "
+                    "Windows."
+                ) from None
             raise RuntimeError(
                 "No se encontró el binario de Claude Code. Descárgalo e inicia "
                 "sesión en Configuración IA (Claude → por suscripción)."
@@ -174,7 +200,9 @@ async def claude_code_complete_if_cache(
             raise RuntimeError(f"No se pudo ejecutar Claude Code: {exc}") from exc
 
         try:
-            salida, error = await asyncio.wait_for(proceso.communicate(), timeout=timeout)
+            salida, error = await asyncio.wait_for(
+                proceso.communicate(texto.encode("utf-8")), timeout=timeout
+            )
         except asyncio.TimeoutError:
             try:
                 proceso.kill()

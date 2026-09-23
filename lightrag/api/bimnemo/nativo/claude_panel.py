@@ -124,20 +124,15 @@ class PanelSuscripcion(QWidget):
         self.boton_probar = self._boton("Probar conexión", self._probar)
         caja.addWidget(self.boton_probar)
 
-        # Desinstalar va en su propia fila y a la derecha: deshace lo que
-        # hicieron los otros tres y no se pulsa por error queriendo entrar.
-        pie = QWidget()
-        pie.setObjectName("fila")
-        caja_pie = QHBoxLayout(pie)
-        caja_pie.setContentsMargins(0, 0, 0, 0)
-        caja_pie.addStretch(1)
+        # Desinstalar, del mismo ancho que los demás: son cuatro acciones de
+        # la misma pantalla y una más estrecha se lee como si fuera de otra
+        # cosa. Va la última, que es su sitio: deshace lo que hacen las otras.
         self.boton_borrar = self._boton("Desinstalar", self._borrar_binario)
         self.boton_borrar.setToolTip(
             "Borra el binario de Claude Code de este equipo. Tu cuenta y tu "
             "suscripción no se tocan."
         )
-        caja_pie.addWidget(self.boton_borrar)
-        caja.addWidget(pie)
+        caja.addWidget(self.boton_borrar)
 
         self.fila_sesion.hide()
         return self.fila_sesion
