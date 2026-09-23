@@ -24,9 +24,21 @@ from urllib.parse import quote
 from PySide6.QtCore import QByteArray, QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
-#: Qué se considera «ha tardado demasiado». El motor contesta en
-#: milisegundos salvo cuando está indexando, que puede tardar.
+#: Qué se considera «ha tardado demasiado» para una petición corriente. El
+#: motor contesta en milisegundos salvo cuando está indexando, que puede
+#: tardar.
 ESPERA_MS = 30_000
+
+#: Para lo que **se sabe** que va a tardar: una respuesta del chat, un login
+#: que se termina en el navegador. Ahí el plazo no vigila al motor, solo
+#: evita que una petición se quede colgada para siempre; por eso es holgado.
+#:
+#: Que la ventana se entere de que el motor se cayó no depende de esto: el
+#: pulso pregunta cada dos segundos por su lado. Un plazo corto aquí no
+#: detecta nada antes, y en cambio corta respuestas que venían de camino
+#: —que es lo que pasaba con el chat y un modelo lento: la ventana decía
+#: «El motor no responde» mientras el motor seguía escribiendo la respuesta.
+ESPERA_LARGA_MS = 600_000
 
 #: Endpoints con **ruta espejo** por memoria. El resto se apunta a una
 #: memoria con `?nemo=`, pero estos tres tienen su propio camino y hay que
@@ -127,8 +139,9 @@ class Motor(QObject):
         ruta: str,
         bien: Callable[[Any], None],
         mal: Optional[Callable[[str], None]] = None,
+        espera_ms: Optional[int] = None,
     ) -> None:
-        self._lanzar("GET", ruta, None, bien, mal)
+        self._lanzar("GET", ruta, None, bien, mal, espera_ms)
 
     def post(
         self,
@@ -136,8 +149,9 @@ class Motor(QObject):
         cuerpo: Any,
         bien: Callable[[Any], None],
         mal: Optional[Callable[[str], None]] = None,
+        espera_ms: Optional[int] = None,
     ) -> None:
-        self._lanzar("POST", ruta, cuerpo, bien, mal)
+        self._lanzar("POST", ruta, cuerpo, bien, mal, espera_ms)
 
     def borrar(
         self,
@@ -222,10 +236,10 @@ class Motor(QObject):
             )
         respuesta.finished.connect(lambda: self._recoger(respuesta, ruta, bien, mal))
 
-    def _peticion(self, ruta: str) -> QNetworkRequest:
+    def _peticion(self, ruta: str, espera_ms: Optional[int] = None) -> QNetworkRequest:
         peticion = QNetworkRequest(QUrl(f"{self.base}{self._resolver(ruta)}"))
         peticion.setHeader(QNetworkRequest.ContentTypeHeader, "application/json")
-        peticion.setTransferTimeout(ESPERA_MS)
+        peticion.setTransferTimeout(ESPERA_MS if espera_ms is None else espera_ms)
         if self._clave:
             peticion.setRawHeader(b"X-API-Key", self._clave.encode("utf-8"))
         return peticion
@@ -237,8 +251,9 @@ class Motor(QObject):
         cuerpo: Any,
         bien: Callable[[Any], None],
         mal: Optional[Callable[[str], None]],
+        espera_ms: Optional[int] = None,
     ) -> None:
-        peticion = self._peticion(ruta)
+        peticion = self._peticion(ruta, espera_ms)
         if metodo == "GET":
             respuesta = self._red.get(peticion)
         else:

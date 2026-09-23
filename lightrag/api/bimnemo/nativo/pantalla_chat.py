@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lightrag.api.bimnemo.nativo.motor import Motor
+from lightrag.api.bimnemo.nativo.motor import ESPERA_LARGA_MS, Motor
 from lightrag.api.bimnemo.nativo import chat_piezas
 from lightrag.api.bimnemo.nativo.piezas import Aviso
 
@@ -168,7 +168,16 @@ class PantallaChat(QWidget):
             "query": pregunta,
             "mode": self.barra.modo.currentData(),
         }
-        self.motor.post(ruta, cuerpo, self._respondio, self._no_pudo)
+        # Con plazo largo: lo que se espera aquí es que un modelo escriba
+        # una respuesta, no que el motor conteste. Un modelo por suscripción
+        # —Claude Code arranca un proceso por llamada— pasa de treinta
+        # segundos con facilidad, y preguntar a varias memorias son varias
+        # recuperaciones antes de redactar. Con el plazo corriente, la
+        # ventana decía «El motor no responde» mientras la respuesta venía
+        # de camino.
+        self.motor.post(
+            ruta, cuerpo, self._respondio, self._no_pudo, espera_ms=ESPERA_LARGA_MS
+        )
 
     def _ruta(self) -> str:
         """La ruta que toca, según «Buscar en» y «Devolver».

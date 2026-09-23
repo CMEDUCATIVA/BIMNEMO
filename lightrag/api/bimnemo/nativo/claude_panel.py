@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from lightrag.api.bimnemo.nativo.motor import Motor
+from lightrag.api.bimnemo.nativo.motor import ESPERA_LARGA_MS, Motor
 
 #: Cada cuánto se pregunta por la instalación mientras corre.
 SONDEO_MS = 500
@@ -268,7 +268,15 @@ class PanelSuscripcion(QWidget):
             return
         self._ocupado(True)
         self.estado.setText("Abre tu navegador y termina el inicio de sesión…")
-        self.motor.post(f"{RUTA}/login", {}, self._sesion_cambiada, self._fallo)
+        # Lo termina una persona en el navegador: el motor espera hasta diez
+        # minutos y la ventana no puede rendirse antes que él.
+        self.motor.post(
+            f"{RUTA}/login",
+            {},
+            self._sesion_cambiada,
+            self._fallo,
+            espera_ms=ESPERA_LARGA_MS,
+        )
 
     def _cerrar_sesion(self) -> None:
         if self.motor is None:
@@ -289,7 +297,11 @@ class PanelSuscripcion(QWidget):
         self._ocupado(True)
         self.boton_probar.setText("Probando…")
         self.boton_probar.setStyleSheet("")
-        self.motor.post(f"{RUTA}/probe", {}, self._probado, self._fallo)
+        # La prueba hace una petición real al proveedor: el motor le da un
+        # minuto, así que la ventana tiene que darle más.
+        self.motor.post(
+            f"{RUTA}/probe", {}, self._probado, self._fallo, espera_ms=ESPERA_LARGA_MS
+        )
 
     def _probado(self, datos: Any) -> None:
         self._ocupado(False)

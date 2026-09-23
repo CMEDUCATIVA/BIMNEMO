@@ -6,6 +6,8 @@ seis pantallas sin tocar ninguna: el enrutado vive en un solo sitio.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 pytestmark = pytest.mark.offline
@@ -72,3 +74,32 @@ def test_un_identificador_raro_va_escapado(motor):
     """Un nombre con espacios partiría la URL en dos."""
     motor.usar_memoria("obra sur/2")
     assert motor._resolver("/bimnemo/files") == "/bimnemo/files?nemo=obra%20sur%2F2"
+
+
+# -- plazos por petición -------------------------------------------------------
+
+
+def test_lo_corriente_lleva_el_plazo_corto(aplicacion):
+    from lightrag.api.bimnemo.nativo.motor import ESPERA_MS, Motor
+
+    motor = Motor("http://127.0.0.1:0")
+    peticion = motor._peticion("/bimnemo/pulso")
+    assert peticion.transferTimeout() == ESPERA_MS
+
+
+def test_se_puede_pedir_un_plazo_largo(aplicacion):
+    """Para lo que se sabe que tarda: una respuesta del chat, un login."""
+    from lightrag.api.bimnemo.nativo.motor import ESPERA_LARGA_MS, Motor
+
+    motor = Motor("http://127.0.0.1:0")
+    peticion = motor._peticion("/query", ESPERA_LARGA_MS)
+    assert peticion.transferTimeout() == ESPERA_LARGA_MS
+    assert ESPERA_LARGA_MS > 300_000, "el motor le da 300 s a un modelo lento"
+
+
+def test_el_chat_pide_el_plazo_largo(aplicacion):
+    """Con el corto, la ventana se rendía mientras la respuesta venía."""
+    from lightrag.api.bimnemo.nativo import pantalla_chat
+
+    fuente = Path(pantalla_chat.__file__).read_text(encoding="utf-8")
+    assert "espera_ms=ESPERA_LARGA_MS" in fuente
