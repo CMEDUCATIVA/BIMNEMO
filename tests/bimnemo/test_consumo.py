@@ -373,3 +373,106 @@ async def test_el_analisis_de_tablas_tambien_se_carga_a_su_archivo():
     finally:
         _PipelineMixin.analyze_multimodal = original
     assert vistos == ["BE-16 expertos.docx"]
+
+
+# --- de qué memoria es cada gasto ---------------------------------------------
+
+
+def test_cada_llamada_apunta_en_que_memoria_se_gasto(registro):
+    """Con varias NEMO, «cuánto me cuesta esta» es lo que se pregunta."""
+    for nemo, modelo in (("obra-sur", "gpt-5-nano"), ("", "gpt-5.6-luna")):
+        testigo = consumo.MEMORIA.set(nemo)
+        try:
+            consumo.Contador("llm", "Indexar", modelo).add_usage(
+                {"prompt_tokens": 100, "completion_tokens": 50}
+            )
+        finally:
+            consumo.MEMORIA.reset(testigo)
+
+    assert _fila(registro, "gpt-5-nano")["nemo"] == "obra-sur"
+    # La memoria heredada es una memoria de verdad, no «ninguna».
+    assert _fila(registro, "gpt-5.6-luna")["nemo"] == ""
+
+
+def test_la_memoria_se_lee_al_crear_el_contador_no_al_apuntar(registro):
+    """En streaming, las cuentas llegan cuando el chorro acaba: ya fuera."""
+    testigo = consumo.MEMORIA.set("obra-sur")
+    contador = consumo.Contador("llm", "Responder", "gpt-5-nano")
+    consumo.MEMORIA.reset(testigo)
+
+    contador.add_usage({"prompt_tokens": 10, "completion_tokens": 5})
+    assert _fila(registro, "gpt-5-nano")["nemo"] == "obra-sur"
+
+
+def test_el_resumen_cuenta_solo_la_memoria_pedida(registro):
+    for nemo, modelo in (("obra-sur", "gpt-5-nano"), ("", "gpt-5.6-luna")):
+        registro.anotar("llm", "Indexar", modelo, "", 1000, 500, nemo=nemo)
+
+    solo = registro.resumen(30, nemo="obra-sur", solo_de_una=True)
+    assert [f["modelo"] for f in solo["rows"]] == ["gpt-5-nano"]
+    assert solo["other_rows"] == 1
+    # Los totales cuadran con las filas que se ven: un total de todas con
+    # filas de una es justo lo que no se entiende.
+    assert solo["totals"]["today"]["llamadas"] == 1
+
+    todas = registro.resumen(30)
+    assert len(todas["rows"]) == 2 and todas["other_rows"] == 0
+
+
+def test_lo_contado_antes_de_medir_por_memoria_no_se_carga_a_ninguna(registro):
+    """Adivinarla a posteriori sería inventarse la cuenta de una NEMO."""
+    registro.anotar("llm", "Indexar", "gpt-5-nano", "", 10, 5)  # sin nemo
+
+    assert _fila(registro, "gpt-5-nano")["nemo"] is None
+    # Ni siquiera a la heredada, que también se identifica con "".
+    heredada = registro.resumen(30, nemo="", solo_de_una=True)
+    assert heredada["rows"] == [] and heredada["other_rows"] == 1
+    assert len(registro.resumen(30)["rows"]) == 1
+
+
+def test_el_marcador_apunta_la_memoria_del_documento(monkeypatch):
+    from types import SimpleNamespace
+
+    from lightrag.pipeline import _PipelineMixin
+
+    vistos = []
+
+    async def procesar(self, **kwargs):
+        vistos.append((consumo.MEMORIA.get(), consumo.DOCUMENTO.get()))
+
+    monkeypatch.setattr(_PipelineMixin, "process_single_document", procesar)
+    consumo.instalar_marcador()
+
+    asyncio.run(
+        _PipelineMixin.process_single_document(
+            SimpleNamespace(workspace="obra-sur"),
+            doc_id="doc-1",
+            status_doc=SimpleNamespace(file_path="C:/entrada/ley.pdf"),
+            parsed_data={},
+            ctx=None,
+        )
+    )
+    assert vistos == [("obra-sur", "ley.pdf")]
+    # Y se quitan las dos al terminar.
+    assert consumo.MEMORIA.get() is None and consumo.DOCUMENTO.get() == ""
+
+
+def test_preguntar_al_chat_se_carga_a_la_memoria_a_la_que_se_pregunta():
+    """Sin esto, el chat de una NEMO se apuntaba en la cuenta de otra."""
+    from types import SimpleNamespace
+
+    from lightrag.lightrag import LightRAG
+
+    vistos = []
+
+    async def preguntar(self, *args, **kwargs):
+        vistos.append(consumo.MEMORIA.get())
+
+    original = LightRAG.aquery
+    try:
+        LightRAG.aquery = preguntar
+        consumo.instalar_marcador()
+        asyncio.run(LightRAG.aquery(SimpleNamespace(workspace="obra-sur"), "¿y?"))
+    finally:
+        LightRAG.aquery = original
+    assert vistos == ["obra-sur"]

@@ -44,6 +44,7 @@ from lightrag.utils import logger
 
 from ..utils_api import get_combined_auth_dependency, internal_server_error
 from .bimnemo_documents_routes import create_bimnemo_documents_routes
+from .bimnemo_progreso_routes import create_bimnemo_progreso_routes
 from .bimnemo_update_routes import create_bimnemo_update_routes
 from .bimnemo_nombres_routes import create_bimnemo_nombres_routes
 from .bimnemo_usage_routes import create_bimnemo_usage_routes
@@ -565,6 +566,9 @@ def create_bimnemo_routes(
     router.include_router(
         create_bimnemo_documents_routes(doc_manager, _resolve_rag, api_key)
     )
+    # El avance va aparte de las acciones: se pregunta cada pocos segundos y
+    # no toca nada, mientras que borrar o reintentar cambian la memoria.
+    router.include_router(create_bimnemo_progreso_routes(_resolve_rag, api_key))
     # Actualizar el programa no es una operación sobre la memoria, pero se
     # niega por lo mismo que el reinicio —una ingesta a medias—, así que se le
     # inyecta la MISMA comprobación de ocupado. Dos versiones de «¿está
@@ -574,9 +578,9 @@ def create_bimnemo_routes(
     router.include_router(
         create_bimnemo_update_routes(rag, check_pipeline_busy_or_raise, api_key)
     )
-    # Cuánto se gasta en IA. No depende de ninguna memoria: es la cuenta del
-    # proveedor.
-    router.include_router(create_bimnemo_usage_routes(api_key))
+    # Cuánto se gasta en IA. Cuenta por memoria —«¿cuánto me cuesta esta?»— y
+    # sabe dar también la cuenta entera, que es la que cuadra con la factura.
+    router.include_router(create_bimnemo_usage_routes(api_key, registry))
     # Si un nombre de archivo cabe en la ruta de Windows, y renombrarlo.
     router.include_router(
         create_bimnemo_nombres_routes(doc_manager, _resolve_rag, api_key)

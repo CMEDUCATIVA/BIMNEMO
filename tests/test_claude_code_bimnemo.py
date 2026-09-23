@@ -63,13 +63,15 @@ async def test_claude_code_token_tracking():
             token_tracker=token_tracker
         )
 
-    # Verificar que se llamó a add_usage
+    # Verificar que se llamó a add_usage con el contrato de LightRAG: un
+    # diccionario de cuentas, como el `usage` que devuelve cada proveedor.
+    # El modelo y el coste NO viajan aquí: los pone el contador de BIMNEMO,
+    # que ya sabe con qué modelo se creó y consulta el precio del momento
+    # (`bimnemo/consumo.py`, `bimnemo/precios.py`).
     assert token_tracker.add_usage.called
-    call_args = token_tracker.add_usage.call_args
-    assert call_args[1]['model'] == 'claude-opus-5'
-    assert call_args[1]['prompt_tokens'] > 0
-    assert call_args[1]['completion_tokens'] > 0
-    assert 'cost' in call_args[1]
+    cuentas = token_tracker.add_usage.call_args[0][0]
+    assert cuentas['prompt_tokens'] > 0
+    assert cuentas['completion_tokens'] > 0
 
 
 @pytest.mark.asyncio

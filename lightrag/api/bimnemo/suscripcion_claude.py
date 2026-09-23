@@ -146,17 +146,39 @@ def _ejecutar(orden: list[str], timeout: float) -> tuple[int, str, str]:
     )
 
 
+def instalado() -> bool:
+    """¿Está el binario de Claude Code en esta máquina?"""
+    return _hay_binario()
+
+
 def estado() -> dict[str, Any]:
-    """¿Hay una sesión de Claude iniciada? Fuente y mensaje para la ventana."""
-    codigo, salida, error = _ejecutar([binario(), "auth", "status", "--json"], STATUS_TIMEOUT)
+    """¿Hay una sesión de Claude iniciada? Fuente y mensaje para la ventana.
+
+    Lleva también ``installed`` y ``path``: sin sesión no se puede distinguir
+    «no hay binario» de «hay binario y nadie ha entrado», y son dos cosas con
+    botones distintos.
+    """
+    if not _hay_binario():
+        return {
+            "logged_in": False,
+            "installed": False,
+            "path": "",
+            "source": "none",
+            "message": "claude-cli-no-encontrado",
+        }
+
+    ruta = binario()
+    puesto = {"installed": True, "path": ruta}
+    codigo, salida, error = _ejecutar([ruta, "auth", "status", "--json"], STATUS_TIMEOUT)
     if codigo == 0:
         try:
             datos = json.loads(salida)
         except (ValueError, TypeError):
             datos = {}
         if datos.get("loggedIn") is True:
-            return {"logged_in": True, "source": "cli", "message": ""}
+            return {**puesto, "logged_in": True, "source": "cli", "message": ""}
         return {
+            **puesto,
             "logged_in": False,
             "source": "cli",
             "message": _limpiar(datos.get("message") or "") or "sin sesión",
@@ -165,11 +187,10 @@ def estado() -> dict[str, Any]:
     # El CLI no contesta: el fichero de credenciales sirve de respaldo con
     # CLIs más antiguos.
     if credenciales().is_file():
-        return {"logged_in": True, "source": "credentials-file", "message": ""}
+        return {**puesto, "logged_in": True, "source": "credentials-file", "message": ""}
 
-    if codigo == -1 and error == "claude-cli-no-encontrado":
-        return {"logged_in": False, "source": "none", "message": "claude-cli-no-encontrado"}
     return {
+        **puesto,
         "logged_in": False,
         "source": "none",
         "message": _limpiar(error or salida) or "sin sesión",
@@ -299,8 +320,25 @@ def iniciar_descarga() -> dict[str, Any]:
 
 
 def progreso_descarga() -> dict[str, Any]:
-    """El estado de la instalación: inactivo, descargando, instalado o error."""
-    return dict(_descarga)
+    """Si el binario está, se está instalando o no está. Y dónde.
+
+    **Se mira el disco, no lo que hizo este proceso.** ``_descarga`` solo
+    recuerda la instalación que arrancó desde aquí, y arranca en «inactivo»
+    cada vez que el motor se reinicia: quien instaló Claude ayer volvía a ver
+    «Descarga el binario» al día siguiente, con el binario puesto.
+
+    Una instalación **en curso** manda sobre el disco: el binario todavía no
+    está y la ventana tiene que seguir enseñando la barra.
+    """
+    actual = dict(_descarga)
+    if actual.get("state") == "descargando":
+        return actual
+    if _hay_binario():
+        return {"state": "instalado", "message": "", "path": binario()}
+    if actual.get("state") == "instalado":
+        # Estaba y ya no: lo borró alguien, desde aquí o desde fuera.
+        return {"state": "inactivo", "message": ""}
+    return actual
 
 
 def eliminar_binario() -> dict[str, Any]:
@@ -338,6 +376,7 @@ def eliminar_binario() -> dict[str, Any]:
 
 __all__ = [
     "binario",
+    "instalado",
     "cerrar_sesion",
     "credenciales",
     "eliminar_binario",

@@ -97,6 +97,7 @@ from lightrag.constants import (
     KG_PURGE_SCHEMA_VERSION,
     KG_WRITE_STATE_PRE_GRAPH,
 )
+from lightrag import doc_progress
 from lightrag.utils import get_env_value
 from lightrag.parser.routing import _chunk_env_int
 
@@ -6510,6 +6511,19 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                     relationships_to_rebuild[edge_tuple] = remaining_sources
                     relation_chunk_updates[edge_tuple] = remaining_sources
 
+            # Per-document delete progress as data, for a progress bar: the
+            # work left is what this purge is about to rebuild and delete.
+            doc_progress.publish(
+                pipeline_status,
+                doc_id,
+                doc_progress.DELETE,
+                0,
+                len(entities_to_rebuild)
+                + len(entities_to_delete)
+                + len(relationships_to_rebuild)
+                + len(relationships_to_delete),
+            )
+
             async with pipeline_status_lock:
                 log_message = (
                     f"[purge] {doc_id}: {len(relationships_to_rebuild)} relation(s) "
@@ -6590,6 +6604,9 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                         for src, tgt in relationships_to_delete
                     ]
                     await self.relation_chunks.delete(relation_storage_keys)
+                doc_progress.advance(
+                    pipeline_status, doc_id, len(relationships_to_delete)
+                )
                 async with pipeline_status_lock:
                     log_message = (
                         f"[purge] {doc_id}: deleted "
@@ -6656,6 +6673,9 @@ class LightRAG(_RoleLLMMixin, _StorageMigrationMixin, _PipelineMixin):
                 if self.entity_chunks:
                     await self.entity_chunks.delete(list(entities_to_delete))
 
+                doc_progress.advance(
+                    pipeline_status, doc_id, len(entities_to_delete)
+                )
                 async with pipeline_status_lock:
                     log_message = (
                         f"[purge] {doc_id}: deleted "

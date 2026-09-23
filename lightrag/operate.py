@@ -12,6 +12,7 @@ import json_repair
 from typing import Any, AsyncIterator, overload, Literal, Callable, Awaitable
 from collections import Counter, defaultdict
 
+from lightrag import doc_progress
 from lightrag.exceptions import (
     IndexFlushError,
     PipelineCancelledException,
@@ -3663,6 +3664,16 @@ async def merge_nodes_and_edges(
         pipeline_status["latest_message"] = log_message
         append_pipeline_history(pipeline_status, log_message)
 
+    # Every merged entity and relation advances this counter (see the two
+    # `doc_progress.advance` calls below).
+    doc_progress.publish(
+        pipeline_status,
+        doc_id or "",
+        doc_progress.MERGE,
+        0,
+        total_entities_count + total_relations_count,
+    )
+
     # ===== Phase 0: write-ahead recovery indexes =====
     # Persist the candidate superset BEFORE any graph/vector/tracking
     # mutation. Candidates are a superset, not proof of existence: purge
@@ -3763,6 +3774,7 @@ async def merge_nodes_and_edges(
                             truncation_write_ahead=truncation_write_ahead,
                         )
 
+                        doc_progress.advance(pipeline_status, doc_id)
                         return entity_data
 
                     except Exception as e:
@@ -3857,6 +3869,7 @@ async def merge_nodes_and_edges(
                             truncation_write_ahead=truncation_write_ahead,
                         )
 
+                        doc_progress.advance(pipeline_status, doc_id)
                         if edge_data is None:
                             return None, []
 
@@ -4090,6 +4103,20 @@ async def extract_entities(
 
     processed_chunks = 0
     total_chunks = len(ordered_chunks)
+
+    # Per-document progress as data, for progress bars: extraction is called
+    # once per document, so every chunk here belongs to the same one.
+    extract_doc_id = next(
+        (
+            str(chunk.get("full_doc_id"))
+            for _key, chunk in ordered_chunks
+            if isinstance(chunk, dict) and chunk.get("full_doc_id")
+        ),
+        "",
+    )
+    doc_progress.publish(
+        pipeline_status, extract_doc_id, doc_progress.EXTRACT, 0, total_chunks
+    )
 
     async def _process_single_content(chunk_key_dp: tuple[str, TextChunkSchema]):
         """Process a single chunk
@@ -4495,6 +4522,13 @@ async def extract_entities(
         log_message = f"Chunk {processed_chunks} of {total_chunks} extracted {entities_count} Ent + {relations_count} Rel {chunk_key}"
         logger.info(log_message)
         status_logger.log(log_message)
+        doc_progress.publish(
+            pipeline_status,
+            extract_doc_id,
+            doc_progress.EXTRACT,
+            processed_chunks,
+            total_chunks,
+        )
 
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges

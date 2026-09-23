@@ -7,6 +7,13 @@ Los datos salen de ``GET /bimnemo/usage``, que reúne el ``usage`` real que
 devuelve cada proveedor (``bimnemo/consumo.py``). La tarjeta no calcula nada:
 pinta.
 
+## De qué memoria
+
+De la abierta. Con varias NEMO, «cuánto me cuesta **esta**» es la pregunta
+que se hace quien mira, y un total de todas no la contesta. «Todas» está a
+un clic, porque esa es la cifra que cuadra con la factura del proveedor —y
+es donde aparece lo contado antes de que BIMNEMO midiera por memoria.
+
 ## Cuándo pregunta
 
 Cada 3 s con la pantalla a la vista y nada más: una tarjeta que nadie mira no
@@ -24,6 +31,7 @@ from urllib.parse import quote
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -71,6 +79,9 @@ POR_DEFECTO = {"Lo que decida el modelo": "Por defecto"}
 #: Tareas que no son de ningún archivo: salen de las preguntas del chat.
 DEL_CHAT = ("Responder", "Palabras clave")
 
+#: Qué gasto se enseña. El valor es el que entiende ``GET /bimnemo/usage``.
+ALCANCES = (("nemo", "Esta memoria"), ("all", "Todas"))
+
 
 def archivo_de(fila: dict[str, Any]) -> str:
     """A quién se carga la fila: el archivo, el chat, o «—» si no se sabe.
@@ -84,6 +95,18 @@ def archivo_de(fila: dict[str, Any]) -> str:
     if fila.get("tarea") in DEL_CHAT:
         return "Preguntas del chat"
     return "—"
+
+
+def memoria_de(fila: dict[str, Any]) -> str:
+    """En qué NEMO se gastó esa fila, dicho para la pantalla.
+
+    Una fila sin memoria apuntada es de antes de que se midiera por memoria:
+    se dice así en vez de cargársela a la que toque, que sería inventarse la
+    cuenta de una NEMO.
+    """
+    if not isinstance(fila.get("nemo"), str):
+        return "sin memoria apuntada (de antes de medirlas)"
+    return str(fila.get("nemo_name") or "").strip() or "—"
 
 
 def razonamiento_de(fila: dict[str, Any]) -> str:
@@ -195,7 +218,11 @@ class TarjetaConsumo(Tarjeta):
     def __init__(self, motor: Motor) -> None:
         super().__init__("Uso y coste de la IA")
         self.motor = motor
-        self._revision: Optional[int] = None
+        #: Lo último pintado: revisión, memoria y alcance. Los tres, porque
+        #: la revisión es del registro entero: al cambiar de memoria no se
+        #: mueve, y sin mirarla la tabla se quedaría con el gasto de la otra.
+        self._visto: Optional[tuple] = None
+        self._alcance = ALCANCES[0][0]
 
         self.pendiente = Aviso()
         self.anadir(self.pendiente)
@@ -203,7 +230,7 @@ class TarjetaConsumo(Tarjeta):
         self.totales = QLabel("…")
         self.totales.setObjectName("dato-valor")
         self.totales.setTextFormat(Qt.RichText)
-        self.anadir(self.totales)
+        self.anadir(self._cabecera())
 
         self.tabla = QTableWidget(0, len(COLUMNAS))
         self.tabla.setObjectName("tabla")
@@ -269,6 +296,48 @@ class TarjetaConsumo(Tarjeta):
         self._reloj.start()
         self.mirar()
 
+    # -- estructura ---------------------------------------------------------
+
+    def _cabecera(self) -> QWidget:
+        """Los totales a la izquierda y de qué memoria son, a la derecha."""
+        fila = QWidget()
+        fila.setObjectName("fila")
+        caja = QHBoxLayout(fila)
+        caja.setContentsMargins(0, 0, 0, 0)
+        caja.setSpacing(8)
+        caja.addWidget(self.totales)
+        caja.addStretch(1)
+
+        self._grupo = QButtonGroup(self)
+        self._grupo.setExclusive(True)
+        for clave, rotulo in ALCANCES:
+            boton = QPushButton(rotulo)
+            boton.setObjectName("chip")
+            boton.setProperty("clave", clave)
+            boton.setCheckable(True)
+            boton.setChecked(clave == self._alcance)
+            boton.setCursor(Qt.PointingHandCursor)
+            boton.setToolTip(
+                "Solo lo gastado en la memoria abierta"
+                if clave == "nemo"
+                else "Toda la cuenta: la cifra que cuadra con la factura del "
+                "proveedor, incluido lo contado antes de medir por memoria"
+            )
+            boton.clicked.connect(lambda _m=False, c=clave: self._ver(c))
+            self._grupo.addButton(boton)
+            caja.addWidget(boton)
+        return fila
+
+    def _ver(self, alcance: str) -> None:
+        """Cambia de memoria abierta a todas, o al revés."""
+        if alcance == self._alcance:
+            return
+        self._alcance = alcance
+        # Se repinta aunque la revisión no haya cambiado: lo que cambió es
+        # qué se está mirando.
+        self._visto = None
+        self.mirar()
+
     # -- datos --------------------------------------------------------------
 
     def _sondear(self) -> None:
@@ -280,7 +349,11 @@ class TarjetaConsumo(Tarjeta):
         self.mirar()
 
     def mirar(self) -> None:
-        self.motor.get("/bimnemo/usage?days=30", self.pintar, None)
+        # La memoria la pone el motor: añade `?nemo=` a cada petición según
+        # cuál esté abierta. Aquí solo se dice si se quiere solo esa o todas.
+        self.motor.get(
+            f"/bimnemo/usage?days=30&scope={self._alcance}", self.pintar, None
+        )
 
     def pintar(self, datos: Any) -> None:
         if not isinstance(datos, dict):
@@ -288,19 +361,36 @@ class TarjetaConsumo(Tarjeta):
         # Antes de mirar la revisión: el aviso importa aunque todavía no se
         # haya gastado nada con lo de antes.
         self._pintar_pendiente(datos)
-        revision = datos.get("revision")
-        if revision is not None and revision == self._revision:
+        visto = (datos.get("revision"), datos.get("nemo"), datos.get("scope"))
+        if visto[0] is not None and visto == self._visto:
             return
-        self._revision = revision
+        self._visto = visto
 
         self._pintar_totales(datos.get("totals") or {})
-        self._pintar_filas(list(datos.get("rows") or []))
+        self._pintar_filas(list(datos.get("rows") or []), datos)
         self.pista.setText(
-            "Medido con lo que devuelve cada proveedor en cada llamada. Es un "
+            self._de_quien(datos)
+            + "Medido con lo que devuelve cada proveedor en cada llamada. Es un "
             "techo: no descuenta la entrada que el proveedor cobra más barata "
             "por tenerla en caché. Precios comprobados el "
             f"{datos.get('prices_checked') or '?'}; los locales cuentan 0."
         )
+
+    @staticmethod
+    def _de_quien(datos: dict[str, Any]) -> str:
+        """De qué memoria es lo que se enseña, y qué se está dejando fuera."""
+        if datos.get("scope") == "all":
+            return "Todo el gasto, de todas las memorias. "
+        nombre = str(datos.get("nemo_name") or "").strip()
+        de = f"Gasto de «{nombre}». " if nombre else "Gasto de esta memoria. "
+        fuera = int(datos.get("other_rows") or 0)
+        if fuera:
+            filas = "fila" if fuera == 1 else "filas"
+            de += (
+                f"Hay {fuera} {filas} más de otras memorias —o de antes de "
+                "medirlas—: están en «Todas». "
+            )
+        return de
 
     def _pintar_pendiente(self, datos: dict[str, Any]) -> None:
         """Lo guardado no es lo que usa el motor: dicho en rojo, con los nombres."""
@@ -332,8 +422,11 @@ class TarjetaConsumo(Tarjeta):
             partes.append(f"{nombre}: <b>{coste_de(t)}</b>")
         self.totales.setText("  ·  ".join(partes))
 
-    def _pintar_filas(self, filas: list[dict[str, Any]]) -> None:
+    def _pintar_filas(
+        self, filas: list[dict[str, Any]], datos: Optional[dict[str, Any]] = None
+    ) -> None:
         self.tabla.setRowCount(len(filas))
+        todas = (datos or {}).get("scope") == "all"
         for i, fila in enumerate(filas):
             tiempo, como = tiempo_de(fila)
             valores = {
@@ -356,6 +449,10 @@ class TarjetaConsumo(Tarjeta):
                 if columna in (ARCHIVO, MODELO, RAZONAMIENTO):
                     # Recortados con puntos suspensivos: el nombre entero, aquí.
                     item.setToolTip(texto)
+                if columna == ARCHIVO and todas:
+                    # Mirando todas las memorias, saber de cuál es cada fila
+                    # es la mitad de la información.
+                    item.setToolTip(f"{texto}\nMemoria: {memoria_de(fila)}")
                 if columna == TIEMPO:
                     item.setToolTip(como)
                 if columna == TOKENS:
@@ -370,6 +467,17 @@ class TarjetaConsumo(Tarjeta):
         vacia = not filas
         self.tabla.setVisible(not vacia)
         self.vacio.setVisible(vacia)
+        if vacia:
+            # Una tabla en blanco no es lo mismo si hay gasto en otra memoria:
+            # ahí lo que falta no es haber gastado, es estar mirando aquí.
+            fuera = int((datos or {}).get("other_rows") or 0)
+            self.vacio.setText(
+                "En esta memoria todavía no se ha gastado nada. Hay gasto en "
+                "otras: pulsa «Todas» para verlo."
+                if fuera
+                else "Todavía no se ha gastado nada. En cuanto indexes un "
+                "documento o hagas una pregunta, aparecerá aquí."
+            )
         # El alto justo para las filas, contando el marco y la barra
         # horizontal: sin ella en la cuenta, cuando aparece se come la última
         # fila y sale una barra vertical para ver una sola línea.
@@ -433,6 +541,7 @@ __all__ = [
     "dinero",
     "duracion",
     "fecha_de",
+    "memoria_de",
     "miles",
     "tiempo_de",
 ]

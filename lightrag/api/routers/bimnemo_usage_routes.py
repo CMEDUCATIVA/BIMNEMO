@@ -29,6 +29,21 @@ class UsageResponse(BaseModel):
     totals: dict[str, dict[str, Any]] = Field(
         description="Totales de hoy (today), 7 días (week) y 30 días (month)"
     )
+    nemo: str = Field(
+        default="", description="NEMO de la que se está contando el gasto"
+    )
+    nemo_name: str = Field(default="", description="Su nombre, para la pantalla")
+    scope: str = Field(
+        default="nemo",
+        description="`nemo`: solo esta memoria. `all`: todas, más lo de antes de medirlas",
+    )
+    other_rows: int = Field(
+        default=0,
+        description=(
+            "Filas del periodo que quedan fuera del filtro: de otras memorias "
+            "o de antes de que se midiera por memoria"
+        ),
+    )
     prices_checked: str = Field(description="Fecha en que se comprobaron los precios")
     revision: int = Field(
         description="Cambia con cada llamada contada; sirve para saber si repintar"
@@ -48,10 +63,23 @@ class UsageResponse(BaseModel):
     )
 
 
-def create_bimnemo_usage_routes(api_key: Optional[str] = None) -> APIRouter:
-    """Sin prefijo propio: se monta dentro del router de BIMNEMO."""
+def create_bimnemo_usage_routes(
+    api_key: Optional[str] = None, registry=None
+) -> APIRouter:
+    """Sin prefijo propio: se monta dentro del router de BIMNEMO.
+
+    ``registry`` es el índice de NEMOs; sirve para dos cosas: dar por buena
+    la memoria que se pide y poner su nombre. Sin él —un servidor sin
+    memorias múltiples— todo el gasto es de la memoria heredada.
+    """
     combined_auth = get_combined_auth_dependency(api_key)
     router = APIRouter(tags=["bimnemo"])
+
+    def _nombre_de(nemo_id: str) -> str:
+        if registry is None:
+            return ""
+        entrada = registry.get(nemo_id)
+        return getattr(entrada, "name", "") if entrada is not None else ""
 
     @router.get(
         "/usage",
@@ -61,8 +89,22 @@ def create_bimnemo_usage_routes(api_key: Optional[str] = None) -> APIRouter:
     )
     async def get_usage(
         days: int = Query(default=30, ge=1, le=366, description="Días hacia atrás"),
+        nemo: Optional[str] = Query(
+            default=None, description="NEMO a contar; por defecto, la activa"
+        ),
+        scope: str = Query(
+            default="nemo",
+            pattern="^(nemo|all)$",
+            description="`nemo`: solo esta memoria. `all`: la cuenta entera",
+        ),
     ) -> UsageResponse:
         """Lo que se ha gastado, medido con el ``usage`` que devuelve cada proveedor.
+
+        **Por memoria.** Cada llamada apunta en qué NEMO se gastó, y por
+        defecto se cuenta solo la abierta: con varias memorias, «cuánto me
+        cuesta esta» es la pregunta que se hace quien mira. ``scope=all`` da
+        la cuenta entera, que es la que cuadra con la factura del proveedor,
+        y es donde sale lo contado antes de que se midiera por memoria.
 
         El coste es un techo: no descuenta la entrada que el proveedor sirve
         desde su caché, porque el contador no recibe ese dato.
@@ -75,9 +117,33 @@ def create_bimnemo_usage_routes(api_key: Optional[str] = None) -> APIRouter:
 
         from .bimnemo_settings_routes import _env_path, _settings_differ_from_running
 
+        nemo_id = nemo or ""
+        if registry is not None:
+            try:
+                nemo_id = registry.resolve(nemo)
+            except Exception as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        datos = consumo.REGISTRO.resumen(
+            days, nemo=nemo_id, solo_de_una=scope != "all"
+        )
+        # En la vista de todas, cada fila dice de qué memoria es. Con el
+        # identificador no basta: la memoria heredada es la cadena vacía.
+        nombres = (
+            {n.id: n.name for n in registry.list()} if registry is not None else {}
+        )
+        for fila in datos["rows"]:
+            marca = fila.get("nemo")
+            fila["nemo_name"] = (
+                nombres.get(marca, "") if isinstance(marca, str) else ""
+            )
+
         guardado = read_env(_env_path())
         return UsageResponse(
-            **consumo.REGISTRO.resumen(days),
+            **datos,
+            nemo=nemo_id,
+            nemo_name=_nombre_de(nemo_id),
+            scope=scope,
             restart_required=_settings_differ_from_running(guardado),
             running_model=os.getenv("LLM_MODEL", ""),
             saved_model=guardado.get("LLM_MODEL", ""),

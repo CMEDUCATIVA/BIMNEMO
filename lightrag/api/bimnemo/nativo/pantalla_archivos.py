@@ -4,6 +4,13 @@ Las mismas ocho columnas y los mismos rótulos que la interfaz web, porque son
 el mismo producto: un fichero que allí sale como «4.9 MB · En memoria» y aquí
 como «5013504 · processed» convierte una aplicación en dos.
 
+## Cómo se reparte el trabajo
+
+Aquí vive **qué** se enseña y qué pasa al pulsar: la memoria abierta, el
+filtro, lo que se está subiendo, y las llamadas al motor. El dibujo de la
+tabla está en ``archivos_tabla`` y las barras de avance en
+``archivos_avance``; juntos pasaban de las novecientas líneas.
+
 ## El estado va en su columna, no en una barra aparte
 
 Cada fichero tiene su propio estado —uno subiendo, otro en cola, otro ya en
@@ -24,61 +31,50 @@ enterarse de que no ha pasado nada.
 from __future__ import annotations
 
 from pathlib import Path
-from time import monotonic
 from typing import Any, Optional
 from urllib.parse import quote
-
-from lightrag.api.bimnemo.nativo.archivos_nombres import GuardianNombres
-from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMessageBox,
-    QProgressBar,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
-from lightrag.api.bimnemo.nativo import formato, iconos, tema
-from lightrag.api.bimnemo.nativo.archivos_piezas import (
-    Filtros,
-    ZonaSoltar,
-    categoria_de,
-    icono_categoria,
+from lightrag.api.bimnemo.nativo import formato, iconos
+from lightrag.api.bimnemo.nativo.archivos_avance import Barras
+from lightrag.api.bimnemo.nativo.archivos_nombres import GuardianNombres
+from lightrag.api.bimnemo.nativo.archivos_piezas import Filtros, ZonaSoltar
+from lightrag.api.bimnemo.nativo.archivos_tabla import (
+    ACCIONES,
+    ARCHIVO,
+    CATEGORIA,
+    COLUMNAS,
+    ESTADO,
+    FRAGMENTOS,
+    MODIFICADO,
+    TAMANO,
+    TIPO,
+    Acciones,
+    TablaArchivos,
+    estado_de,
 )
+from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
 from lightrag.api.bimnemo.nativo.motor import Motor
-from lightrag.api.bimnemo.nativo.piezas import Aviso, Pantalla, Tarjeta, insignia
-
-#: Las columnas, en el orden de la web.
-COLUMNAS = (
-    "Archivo",
-    "Categoría",
-    "Tipo",
-    "Tamaño",
-    "Estado",
-    "Fragmentos",
-    "Modificado",
-    "Acciones",
-)
-ARCHIVO, CATEGORIA, TIPO, TAMANO, ESTADO, FRAGMENTOS, MODIFICADO, ACCIONES = range(8)
+from lightrag.api.bimnemo.nativo.piezas import Aviso, Pantalla, Tarjeta
 
 #: Cada cuánto se mira el avance: mientras hay trabajo, y en reposo.
 CADENCIA_ACTIVA = 2000
 CADENCIA_REPOSO = 6000
 
-#: Cuánto se espera sin que nadie trabaje antes de decir que algo va mal.
-#: Documentos en cola y la tubería parada es normal un instante —acaban de
-#: encolarse— y sospechoso a los veinte segundos.
-PACIENCIA = 20.0
+#: Las columnas se vuelven a exportar desde aquí aunque vivan en
+#: ``archivos_tabla``: quien habla de la pantalla de Archivos —la ventana,
+#: las pruebas— pregunta por ella, no por el fichero donde acabó el dibujo.
+__all__ = ["CADENCIA_ACTIVA", "CADENCIA_REPOSO", "COLUMNAS", "PantallaArchivos"]
 
 
 class PantallaArchivos(Pantalla):
@@ -108,18 +104,13 @@ class PantallaArchivos(Pantalla):
         self._memoria = ""
         self._filas: list[dict[str, Any]] = []
 
-        #: Lo último que contestó `/bimnemo/progress`, y desde cuándo está
-        #: parado. Las barras de las filas se pintan con esto.
-        self._avance: dict[str, Any] = {}
-        self._parado_desde: Optional[float] = None
         self._sello: Optional[str] = None
         self._ultima_cuenta: Optional[int] = None
         #: Si el motor ya ha contestado alguna vez. Hasta entonces no hay
         #: «cero archivos»: hay «todavía no se sabe», y son cosas distintas.
         self._recibido = False
-        #: Las barras vivas, por nombre de fichero, para poder moverlas sin
-        #: repintar la tabla entera.
-        self._barras: dict[str, tuple[QProgressBar, QLabel]] = {}
+        #: Las barras vivas de la tabla y el último avance del motor.
+        self.barras = Barras()
         #: Qué nombre cabe en la memoria abierta, y el aviso si no.
         self.nombres = GuardianNombres(
             motor,
@@ -215,7 +206,19 @@ class PantallaArchivos(Pantalla):
         self.filtros.elegida.connect(lambda _clave: self._repintar())
         tarjeta.anadir(self.filtros)
 
-        tarjeta.anadir(self._tabla())
+        # La tabla dibuja; lo que hacen sus botones sigue viviendo aquí, que
+        # es donde están los avisos y el refresco que tocan.
+        self.tabla = TablaArchivos(
+            self.barras,
+            Acciones(
+                pausar=self._pausar,
+                reintentar=self._reintentar,
+                renombrar=self._renombrar,
+                borrar=self._confirmar_borrado,
+                no_cabe=lambda nombre: self.nombres.no_cabe(nombre),
+            ),
+        )
+        tarjeta.anadir(self.tabla)
 
         # El hueco. Una tabla vacía sin explicación se lee como un fallo de
         # carga; esto dice si es que no hay nada o si es el filtro.
@@ -226,57 +229,6 @@ class PantallaArchivos(Pantalla):
         self.vacio.hide()
         tarjeta.anadir(self.vacio)
         return tarjeta
-
-    def _tabla(self) -> QWidget:
-        self.tabla = QTableWidget(0, len(COLUMNAS))
-        self.tabla.setObjectName("tabla")
-        self.tabla.setHorizontalHeaderLabels(COLUMNAS)
-        self.tabla.verticalHeader().setVisible(False)
-        # El alto de fila manda sobre el relleno de la hoja de estilo: es lo
-        # que decide si la barra de avance y los botones caben.
-        self.tabla.verticalHeader().setDefaultSectionSize(46)
-        self.tabla.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tabla.setShowGrid(False)
-        # Sin envolver: un nombre largo parte en dos líneas y aprieta la fila
-        # hasta que no cabe la barra de avance. Se recorta con puntos
-        # suspensivos, y el nombre entero está en el rótulo emergente.
-        self.tabla.setWordWrap(False)
-
-        cabecera = self.tabla.horizontalHeader()
-        # Alineado desde el código y no desde la hoja de estilo: Qt ignora
-        # `text-align` en las secciones de cabecera.
-        cabecera.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        cabecera.setSectionResizeMode(ARCHIVO, QHeaderView.Stretch)
-        cabecera.setMinimumSectionSize(60)
-        # Anchos de salida y a mano, no `ResizeToContents`: ese modo mide la
-        # cabecera y el relleno de la hoja de estilo, y con ocho columnas
-        # inflaba «Modificado» a 239 píxeles para una fecha de 110, dejando
-        # el nombre del fichero —lo único que de verdad hay que leer— en 183
-        # y con barra de desplazamiento horizontal. Quedan ajustables: en una
-        # ventana ancha cada uno estira la que le interesa.
-        for columna, ancho in (
-            (CATEGORIA, 122),
-            (TIPO, 66),
-            (TAMANO, 84),
-            (ESTADO, 182),
-            (FRAGMENTOS, 88),
-            (MODIFICADO, 128),
-        ):
-            cabecera.setSectionResizeMode(columna, QHeaderView.Interactive)
-            self.tabla.setColumnWidth(columna, ancho)
-        # La de acciones no: lleva botones de tamaño fijo y estirarla solo
-        # deja hueco vacío.
-        cabecera.setSectionResizeMode(ACCIONES, QHeaderView.Fixed)
-        self.tabla.setColumnWidth(ACCIONES, 96)
-
-        # Las dos columnas de números se alinean a la derecha, cabecera
-        # incluida: es como se comparan cifras de un vistazo.
-        for columna in (TAMANO, FRAGMENTOS):
-            item = self.tabla.horizontalHeaderItem(columna)
-            if item is not None:
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        return self.tabla
 
     # -- datos --------------------------------------------------------------
 
@@ -383,13 +335,8 @@ class PantallaArchivos(Pantalla):
             self._ultima_cuenta = total
             self.cuenta.emit(total)
 
-        self._barras.clear()
-        self.tabla.setRowCount(len(visibles))
-        for indice, archivo in enumerate(visibles):
-            self._pintar_fila(indice, archivo)
-
+        self.tabla.pintar(visibles, self._catalogo, self._subiendo, self._borrandose)
         self._decir_si_esta_vacio(len(visibles), total)
-        self._ajustar_alto(len(visibles))
 
     def _decir_si_esta_vacio(self, visibles: int, total: int) -> None:
         if visibles:
@@ -405,294 +352,6 @@ class PantallaArchivos(Pantalla):
         )
         self.vacio.show()
 
-    def _ajustar_alto(self, filas: int) -> None:
-        """La tabla ocupa lo que ocupan sus filas, ni más ni menos.
-
-        Con un alto fijo, seis ficheros dejaban media tarjeta en blanco —que
-        se lee como «aquí falta algo»— y cincuenta no cabían igual. El tope
-        existe para que la tarjeta no crezca sin fin: pasado ese punto, la
-        que se desplaza es la tabla.
-        """
-        alto = self.tabla.horizontalHeader().height() + filas * 46 + 4
-        self.tabla.setFixedHeight(max(120, min(alto, 620)))
-
-    def _pintar_fila(self, indice: int, archivo: dict[str, Any]) -> None:
-        nombre = str(archivo.get("name") or "")
-        categoria = categoria_de(self._catalogo, archivo.get("category"))
-        color, fondo = tema.color_categoria(str(categoria.get("color") or "slate"))
-
-        celda = QTableWidgetItem(nombre)
-        celda.setIcon(icono_categoria(str(categoria.get("color") or "slate")))
-        # El nombre completo al pasar el ratón: la columna lo recorta cuando
-        # la ventana es estrecha, y estos nombres se parecen entre sí justo
-        # en el final.
-        celda.setToolTip(nombre)
-        self.tabla.setItem(indice, ARCHIVO, celda)
-
-        self.tabla.setCellWidget(
-            indice,
-            CATEGORIA,
-            self._envolver(insignia(str(categoria["label"]), color, fondo)),
-        )
-        self.tabla.setItem(
-            indice, TIPO, QTableWidgetItem(str(archivo.get("type") or "—"))
-        )
-        self.tabla.setItem(
-            indice, TAMANO, self._numero(formato.tamano(archivo.get("size_bytes")))
-        )
-
-        estado = self._estado_de(archivo, nombre)
-        self.tabla.setCellWidget(
-            indice, ESTADO, self._celda_estado(nombre, estado, self._pista_de(archivo, estado))
-        )
-
-        trozos = archivo.get("chunks_count")
-        self.tabla.setItem(
-            indice,
-            FRAGMENTOS,
-            self._numero("—" if trozos is None else formato.numero(trozos)),
-        )
-        self.tabla.setItem(
-            indice,
-            MODIFICADO,
-            QTableWidgetItem(formato.fecha(archivo.get("modified_at"))),
-        )
-        self.tabla.setCellWidget(indice, ACCIONES, self._acciones_de(archivo, estado))
-
-    @staticmethod
-    def _numero(texto: str) -> QTableWidgetItem:
-        item = QTableWidgetItem(texto)
-        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        return item
-
-    @staticmethod
-    def _envolver(widget: QWidget, derecha: int = 8) -> QWidget:
-        """Mete un widget en la celda con margen.
-
-        Pegado al borde de la celda queda tocando la línea de la fila de al
-        lado, que es justo lo que hace que una tabla parezca mal dibujada.
-        """
-        caja_exterior = QWidget()
-        caja_exterior.setObjectName("fila")
-        caja = QHBoxLayout(caja_exterior)
-        caja.setContentsMargins(4, 2, derecha, 2)
-        caja.setSpacing(6)
-        caja.addWidget(widget)
-        caja.addStretch(1)
-        return caja_exterior
-
-    def _estado_de(self, archivo: dict[str, Any], nombre: str) -> str:
-        """El estado que manda en esa fila, en crudo.
-
-        El orden importa: lo que se está subiendo gana —el motor aún no sabe
-        que existe— y «borrándose» gana a lo que diga el motor, que es lo
-        último que se pidió sobre esa fila y lo único que explica por qué
-        sigue ahí.
-        """
-        if nombre in self._subiendo:
-            return "subiendo"
-        if nombre in self._borrandose:
-            return "deleting"
-        if archivo.get("waiting"):
-            # Tiene una acción apuntada que espera a que la memoria se libere.
-            return "espera"
-        if archivo.get("duplicate_of") is not None:
-            return "duplicado"
-        if archivo.get("paused") and archivo.get("status") == "failed":
-            return "pausado"
-        return str(archivo.get("status") or "")
-
-    @staticmethod
-    def _pista_de(archivo: dict[str, Any], estado: str) -> str:
-        """Por qué un documento falló, o de qué es copia, al pasar el ratón.
-
-        El motivo ya viajaba en cada fila y no se enseñaba en ningún sitio:
-        la tabla decía «Fallido» y había que ir a buscar el porqué al Panel.
-        """
-        if estado in ("failed", "duplicado", "pausado"):
-            return str(archivo.get("error_msg") or "")
-        return ""
-
-    def _celda_estado(self, nombre: str, estado: str, pista: str = "") -> QWidget:
-        """La insignia del estado y, si hay trabajo, su barra debajo."""
-        caja_exterior = QWidget()
-        caja_exterior.setObjectName("fila")
-        caja_exterior.setToolTip(pista)
-        columna = QVBoxLayout(caja_exterior)
-        columna.setContentsMargins(4, 4, 8, 4)
-        columna.setSpacing(3)
-
-        if estado == "subiendo":
-            # Subir no es un estado del motor: va del azul de «trabajando»,
-            # que es lo que está pasando de verdad.
-            rotulo = f"Subiendo {self._subiendo.get(nombre, 0)} %"
-            color, fondo = tema.color_estado("processing")
-        else:
-            rotulo = formato.estado(estado)
-            color, fondo = tema.color_estado(estado)
-
-        fila = QWidget()
-        fila.setObjectName("fila")
-        caja = QHBoxLayout(fila)
-        caja.setContentsMargins(0, 0, 0, 0)
-        caja.addWidget(insignia(rotulo, color, fondo, punto=True))
-        caja.addStretch(1)
-        columna.addWidget(fila)
-
-        if estado == "subiendo" or estado in formato.EN_CURSO:
-            barra = QProgressBar()
-            barra.setObjectName("avance")
-            barra.setTextVisible(False)
-            texto = QLabel("")
-            texto.setObjectName("avance-texto")
-
-            debajo = QWidget()
-            debajo.setObjectName("fila")
-            caja2 = QHBoxLayout(debajo)
-            caja2.setContentsMargins(0, 0, 0, 0)
-            caja2.setSpacing(6)
-            caja2.addWidget(barra, 1)
-            caja2.addWidget(texto)
-            columna.addWidget(debajo)
-
-            self._barras[nombre] = (barra, texto)
-            self._poner_avance(nombre, estado)
-
-        return caja_exterior
-
-    def _poner_avance(self, nombre: str, estado: str) -> None:
-        """Pone la barra de una fila con lo último que se sabe.
-
-        El motor publica **un** recuento de fragmentos para toda la tubería,
-        así que el número se le pone a la fila que de verdad está
-        `processing`. Las demás se quedan indeterminadas: enseñarles un
-        porcentaje ajeno sería peor que no enseñar ninguno.
-        """
-        pareja = self._barras.get(nombre)
-        if pareja is None:
-            return
-        barra, texto = pareja
-
-        if estado == "subiendo":
-            barra.setRange(0, 100)
-            barra.setValue(self._subiendo.get(nombre, 0))
-            texto.setText("")
-            return
-
-        parado = (
-            bool(self._avance.get("stalled"))
-            and self._parado_desde is not None
-            and monotonic() - self._parado_desde > PACIENCIA
-        )
-        self._marcar_parada(barra, parado)
-        if parado:
-            barra.setRange(0, 100)
-            barra.setValue(0)
-            texto.setText("Sin avanzar")
-            texto.setToolTip(
-                "El motor lleva un rato sin procesar. Puede que el modelo no "
-                "responda o que falte configuración."
-            )
-            return
-
-        texto.setToolTip("")
-        total = int(self._avance.get("chunk_total") or 0)
-        hechos = int(self._avance.get("chunk_done") or 0)
-        if estado == "processing" and self._avance.get("busy") and total > 0:
-            por_ciento = min(100, round(hechos * 100 / total))
-            barra.setRange(0, 100)
-            barra.setValue(por_ciento)
-            texto.setText(f"{por_ciento} % · {hechos}/{total}")
-        else:
-            # Indeterminada: hay trabajo, pero nadie sabe cuánto queda.
-            barra.setRange(0, 0)
-            texto.setText("")
-
-    @staticmethod
-    def _marcar_parada(barra: QProgressBar, parado: bool) -> None:
-        """Pinta la barra de gris, o la devuelve al azul.
-
-        Se pone y se **quita**: la misma barra se reutiliza entre sondeos, y
-        una que se quedara marcada seguiría gris después de que el motor
-        volviera a moverse.
-        """
-        if barra.property("parado") == ("si" if parado else ""):
-            return
-        barra.setProperty("parado", "si" if parado else "")
-        barra.style().unpolish(barra)
-        barra.style().polish(barra)
-
-    def _acciones_de(self, archivo: dict[str, Any], estado: str) -> QWidget:
-        caja_exterior = QWidget()
-        caja_exterior.setObjectName("fila")
-        caja = QHBoxLayout(caja_exterior)
-        caja.setContentsMargins(4, 4, 8, 4)
-        caja.setSpacing(6)
-        caja.addStretch(1)
-
-        doc_id = str(archivo.get("doc_id") or "")
-        if estado in formato.PAUSABLES:
-            # LightRAG para la tubería de la memoria entera, no un documento
-            # suelto: se dice en el rótulo en vez de fingir lo contrario.
-            pausar = self._boton_fila(
-                "pausa",
-                "Pausar la indexación de esta memoria. Se reanuda con ⟳ sin "
-                "volver a pagar lo ya extraído (con el mismo modelo).",
-            )
-            pausar.clicked.connect(self._pausar)
-            caja.addWidget(pausar)
-        nombre_fila = str(archivo.get("name") or "")
-        if estado == "espera":
-            # Ya está apuntada: otro botón aquí solo la duplicaría.
-            pass
-        elif archivo.get("name_too_long") or (
-            not archivo.get("status") and self.nombres.no_cabe(nombre_fila)
-        ):
-            # Se arregla renombrando, no reintentando: fallaría igual.
-            renombrar = self._boton_fila("editar", "Renombrar y volver a leer")
-            renombrar.clicked.connect(lambda: self._renombrar(nombre_fila))
-            caja.addWidget(renombrar)
-        elif estado in ("failed", "pausado") and doc_id:
-            # Solo este documento: el botón está en su fila. Los demás
-            # fallidos se quedan como están.
-            reintentar = self._boton_fila(
-                "recargar",
-                "Reanudar este documento" if estado == "pausado"
-                else "Reintentar este documento",
-            )
-            reintentar.clicked.connect(lambda: self._reintentar(doc_id))
-            caja.addWidget(reintentar)
-
-        borrando = estado == "deleting"
-        if borrando:
-            pista = "Borrándose…"
-        elif estado == "duplicado":
-            # Reintentar una copia no serviría de nada: se volvería a
-            # rechazar. Lo único útil es quitarla, y se dice qué se pierde.
-            pista = "Borrar esta copia. El original sigue en la memoria."
-        else:
-            pista = "Borrar este archivo"
-        borrar = self._boton_fila("borrar", pista)
-        borrar.setEnabled(bool(archivo.get("name")) and not borrando)
-        borrar.clicked.connect(lambda: self._confirmar_borrado(archivo))
-        caja.addWidget(borrar)
-        return caja_exterior
-
-    @staticmethod
-    def _boton_fila(icono: str, pista: str) -> QPushButton:
-        """Un botón de acción de fila: solo icono, como en la web.
-
-        Con rótulo, «Reintentar» y «Borrar» se comen ciento setenta píxeles
-        de la columna del nombre, que es la que de verdad hace falta ancha.
-        """
-        boton = QPushButton()
-        boton.setObjectName("icono")
-        iconos.poner(boton, icono, 14)
-        boton.setToolTip(pista)
-        boton.setCursor(Qt.PointingHandCursor)
-        boton.setFixedSize(30, 26)
-        return boton
-
     # -- vigilancia ---------------------------------------------------------
 
     def _mirar(self) -> None:
@@ -702,15 +361,7 @@ class PantallaArchivos(Pantalla):
     def _avance_llego(self, datos: Any) -> None:
         if not isinstance(datos, dict):
             return
-        self._avance = datos
-
-        activo = bool(datos.get("busy")) or int(datos.get("working") or 0) > 0
-        if activo and datos.get("stalled"):
-            if self._parado_desde is None:
-                self._parado_desde = monotonic()
-        else:
-            self._parado_desde = None
-
+        activo = self.barras.recordar(datos)
         self._cadencia(CADENCIA_ACTIVA if activo else CADENCIA_REPOSO)
 
         sello = str(datos.get("revision") or "")
@@ -722,15 +373,24 @@ class PantallaArchivos(Pantalla):
         # primer sondeo únicamente toma la referencia.
         if cambio:
             self.refrescar()
-        elif activo:
+        elif activo or self._borrandose:
+            # Borrar no cambia el sello hasta que termina, y purgar el grafo
+            # lleva segundos: la barra de esa fila tiene que seguir viva.
             self._repintar_barras()
 
     def _repintar_barras(self) -> None:
         """Mueve las barras que ya están puestas, sin rehacer la tabla."""
         for archivo in self._filas_visibles():
             nombre = str(archivo.get("name") or "")
-            if nombre in self._barras:
-                self._poner_avance(nombre, self._estado_de(archivo, nombre))
+            if not self.barras.tiene(nombre):
+                continue
+            estado = estado_de(archivo, nombre, self._subiendo, self._borrandose)
+            self.barras.pintar(
+                nombre,
+                str(archivo.get("doc_id") or ""),
+                estado,
+                self._subiendo.get(nombre, 0) if estado == "subiendo" else None,
+            )
 
     def _cadencia(self, ms: int) -> None:
         if self._vigilante.interval() != ms:
@@ -782,8 +442,8 @@ class PantallaArchivos(Pantalla):
             # Se mueve la barra de esa fila y se deja la tabla en paz: pedir
             # el listado entero en cada trozo enviado es recorrer el disco
             # cincuenta veces por fichero.
-            if nombre in self._barras:
-                self._poner_avance(nombre, "subiendo")
+            if self.barras.tiene(nombre):
+                self.barras.pintar(nombre, "", "subiendo", self._subiendo[nombre])
             else:
                 self._repintar()
 
@@ -902,6 +562,9 @@ class PantallaArchivos(Pantalla):
         # trabajo, no cuando termina, y purgar un documento lleva segundos.
         self._borrandose.add(nombre)
         self.aviso.informar(f"Borrando «{nombre}»…")
+        # Mientras purga, el motor publica cuántas entidades y relaciones
+        # lleva: se mira seguido para que esa barra se mueva de verdad.
+        self._cadencia(CADENCIA_ACTIVA)
         self._repintar()
 
         def hecho(_datos: Any) -> None:

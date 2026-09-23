@@ -101,6 +101,18 @@ PROGRESO: dict[str, Any] = {
     "chunk_total": 20,
     "revision": "r1",
     "stalled": False,
+    # Avance por documento: es lo que pinta cada barra. `charla.pptx` es
+    # `doc-2`, el que de verdad está extrayendo.
+    "docs": [
+        {
+            "doc_id": "doc-2",
+            "phase": "extract",
+            "done": 9,
+            "total": 20,
+            "label": "Extrayendo 9/20 fragmentos",
+            "percent": 63,
+        }
+    ],
 }
 
 
@@ -113,7 +125,7 @@ def pantalla(aplicacion):
     p._catalogo = list(CATALOGO["categories"])
     p._extensiones = list(CATALOGO["ingestible_extensions"])
     p.zona.formatos(p._extensiones)
-    p._avance = dict(PROGRESO)
+    p.barras.recordar(dict(PROGRESO))
     p._recibir(dict(FICHEROS))
     return p
 
@@ -338,27 +350,109 @@ def test_si_la_categoria_elegida_desaparece_se_vuelve_a_todas(pantalla):
 # --- Avance ----------------------------------------------------------------
 
 
-def test_el_porcentaje_va_en_la_fila_que_de_verdad_indexa(pantalla):
-    """El motor publica un recuento para toda la tubería, no por documento."""
+def test_cada_fila_lleva_el_avance_de_su_documento(pantalla):
+    """El motor publica avance por documento; la fila busca el suyo.
+
+    Antes solo había un recuento para toda la tubería: la única fila que
+    podía enseñar un número era la que estuviera extrayendo, y con dos
+    documentos en cola eso dejaba casi toda la tabla con una barra que iba
+    y venía sin decir nada.
+    """
     from lightrag.api.bimnemo.nativo.pantalla_archivos import ESTADO
 
     celda = pantalla.tabla.cellWidget(1, ESTADO)
     barra = _barras(celda)[0]
-    assert barra.value() == 45
-    assert "9/20" in _texto(celda, 1)
+    assert barra.value() == 63
+    assert "Extrayendo" in _texto(celda, 1)
+    # La frase entera del motor, donde sí cabe.
+    assert "9/20" in celda.toolTip()
 
     # La fila terminada no lleva barra: una al 100 % permanente es ruido.
     assert _barras(pantalla.tabla.cellWidget(0, ESTADO)) == []
 
 
-def test_parado_mucho_rato_lo_dice(pantalla):
-    """«¿Está bloqueado?» es la pregunta que la pantalla no sabía contestar."""
-    from lightrag.api.bimnemo.nativo import pantalla_archivos
+def test_dos_documentos_a_la_vez_no_comparten_porcentaje(pantalla):
+    """Cada uno el suyo: antes el segundo heredaba el número del primero."""
     from lightrag.api.bimnemo.nativo.pantalla_archivos import ESTADO
 
-    pantalla._avance = dict(PROGRESO, stalled=True, busy=False)
+    ficheros = {
+        "files": [
+            dict(FICHEROS["files"][1], name="uno.pptx", doc_id="doc-2"),
+            dict(FICHEROS["files"][1], name="dos.pptx", doc_id="doc-9"),
+        ],
+        "total": 2,
+    }
+    pantalla.barras.recordar(
+        dict(
+            PROGRESO,
+            docs=PROGRESO["docs"]
+            + [
+                {
+                    "doc_id": "doc-9",
+                    "phase": "analyze",
+                    "done": 2,
+                    "total": 8,
+                    "label": "Analizando tablas e imágenes 2/8",
+                    "percent": 17,
+                }
+            ],
+        )
+    )
+    pantalla._recibir(ficheros)
+
+    assert _barras(pantalla.tabla.cellWidget(0, ESTADO))[0].value() == 63
+    assert _barras(pantalla.tabla.cellWidget(1, ESTADO))[0].value() == 17
+    assert "Tablas" in _texto(pantalla.tabla.cellWidget(1, ESTADO), 1)
+
+
+def test_borrar_un_documento_tambien_mueve_su_barra(pantalla):
+    """Purgar el grafo lleva segundos y antes no se veía nada moverse."""
+    from lightrag.api.bimnemo.nativo.pantalla_archivos import ESTADO
+
+    pantalla._borrandose.add("manual.docx")
+    pantalla.barras.recordar(
+        dict(
+            PROGRESO,
+            docs=[
+                {
+                    "doc_id": "doc-1",
+                    "phase": "delete",
+                    "done": 30,
+                    "total": 120,
+                    "label": "Borrando 30/120 entidades y relaciones",
+                    "percent": 25,
+                }
+            ],
+        )
+    )
+    pantalla._repintar()
+
+    celda = pantalla.tabla.cellWidget(0, ESTADO)
+    assert _barras(celda)[0].value() == 25
+    assert "Borrando" in _texto(celda, 1)
+
+
+def test_sin_avance_publicado_la_barra_no_se_inventa_un_numero(pantalla):
+    """Indeterminada es honesto; un porcentaje ajeno, no."""
+    from lightrag.api.bimnemo.nativo.pantalla_archivos import ESTADO
+
+    pantalla.barras.recordar(dict(PROGRESO, docs=[]))
+    pantalla._repintar()
+
+    barra = _barras(pantalla.tabla.cellWidget(1, ESTADO))[0]
+    assert (barra.minimum(), barra.maximum()) == (0, 0)
+
+
+def test_parado_mucho_rato_lo_dice(pantalla):
+    """«¿Está bloqueado?» es la pregunta que la pantalla no sabía contestar."""
+    from time import monotonic
+
+    from lightrag.api.bimnemo.nativo.archivos_avance import PACIENCIA
+    from lightrag.api.bimnemo.nativo.pantalla_archivos import ESTADO
+
+    pantalla.barras.recordar(dict(PROGRESO, stalled=True, busy=False))
     # Como si llevara parado más de la cuenta.
-    pantalla._parado_desde = -pantalla_archivos.PACIENCIA * 2
+    pantalla.barras._parado_desde = monotonic() - PACIENCIA * 2
     pantalla._repintar()
 
     assert _texto(pantalla.tabla.cellWidget(1, ESTADO), 1) == "Sin avanzar"
@@ -370,8 +464,8 @@ def test_un_parpadeo_de_parada_no_alarma(pantalla):
 
     from lightrag.api.bimnemo.nativo.pantalla_archivos import ESTADO
 
-    pantalla._avance = dict(PROGRESO, stalled=True, busy=False)
-    pantalla._parado_desde = monotonic()
+    pantalla.barras.recordar(dict(PROGRESO, stalled=True, busy=False))
+    pantalla.barras._parado_desde = monotonic()
     pantalla._repintar()
 
     assert _texto(pantalla.tabla.cellWidget(1, ESTADO), 1) != "Sin avanzar"
@@ -440,8 +534,10 @@ def test_pausar_llama_a_la_ruta_de_la_memoria(pantalla):
 
 
 def test_un_documento_pausado_no_sale_como_fallido(pantalla):
+    from lightrag.api.bimnemo.nativo.archivos_tabla import estado_de
+
     archivo = {"name": "ley.pdf", "status": "failed", "paused": True, "doc_id": "d"}
-    assert pantalla._estado_de(archivo, "ley.pdf") == "pausado"
+    assert estado_de(archivo, "ley.pdf", {}, set()) == "pausado"
 
 # --- nombres demasiado largos -------------------------------------------------
 

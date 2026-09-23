@@ -127,6 +127,24 @@ class _RoleLLMMixin:
             raise ValueError(f"Invalid LLM role: {role}")
         return normalized
 
+    def llm_role_func(self, role: str = "query") -> Callable[..., object]:
+        """Return a role's ready-to-call LLM function.
+
+        The counterpart of :meth:`get_llm_role_config`, which only *describes*
+        a role: this returns the callable that the query and extraction paths
+        use, with the role's model, provider options, model kwargs, timeout
+        and concurrency queue already applied.
+
+        Callers outside the pipeline — an endpoint that writes one answer over
+        material it has already gathered, say — must use this instead of
+        ``llm_model_func``. The base function is deliberately unwrapped: it
+        carries no role configuration, and the generic bindings that read the
+        model name out of ``hashing_kv`` (ollama, lollms, claude_code) get an
+        empty one when called directly, silently answering with a default
+        model rather than the configured one.
+        """
+        return self._role_llm_states[self._normalize_llm_role(role)].wrapped
+
     def register_role_llm_builder(
         self,
         builder: Callable[

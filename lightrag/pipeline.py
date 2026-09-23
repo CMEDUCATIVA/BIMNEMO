@@ -30,6 +30,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
+from lightrag import doc_progress
 from lightrag.base import (
     CURSOR_END,
     CURSOR_START,
@@ -5002,7 +5003,30 @@ class _PipelineMixin:
         populated by ``_parse_worker`` + ``_analyze_worker``.  Drives the
         PROCESSING → PROCESSED state machine, with FAILED fallbacks at both
         the extract and merge stage boundaries.
+
+        Its per-document progress entry (``doc_progress``) is dropped on the
+        way out, whichever way it goes: a finished document must not leave a
+        half-full bar behind.
         """
+        try:
+            return await self._process_single_document(
+                doc_id=doc_id,
+                status_doc=status_doc,
+                parsed_data=parsed_data,
+                ctx=ctx,
+            )
+        finally:
+            doc_progress.clear(ctx.pipeline_status, doc_id)
+
+    async def _process_single_document(
+        self,
+        *,
+        doc_id: str,
+        status_doc: DocProcessingStatus,
+        parsed_data: dict[str, Any],
+        ctx: _BatchRunContext,
+    ) -> None:
+        """The state machine itself; see :meth:`process_single_document`."""
         from lightrag.parser.routing import parse_process_options
 
         file_path = resolve_doc_file_path(status_doc=status_doc)
@@ -7690,6 +7714,22 @@ class _PipelineMixin:
                     existing.append(cache_id)
                 item_obj["llm_cache_list"] = existing
 
+            # Items already analyzed in this document, across sidecars, and how
+            # many are known so far. Both feed ``doc_progress``.
+            analyzed_done = 0
+            analyzed_total = 0
+
+            def _analyzed_one() -> None:
+                nonlocal analyzed_done
+                analyzed_done += 1
+                doc_progress.publish(
+                    pipeline_status,
+                    doc_id,
+                    doc_progress.ANALYZE,
+                    analyzed_done,
+                    analyzed_total,
+                )
+
             async def _run_with_progress_log(coro, kind: str, item_id: str):
                 """Append per-item completion log to pipeline_status the moment
                 this single ``_analyze_*`` task finishes — not after the whole
@@ -7704,6 +7744,7 @@ class _PipelineMixin:
                 try:
                     result = await coro
                 except Exception:
+                    _analyzed_one()
                     log_message = f"Analyzing {kind}/{item_id}: failed"
                     logger.warning(log_message)
                     if pipeline_status is not None and pipeline_status_lock is not None:
@@ -7711,6 +7752,7 @@ class _PipelineMixin:
                             pipeline_status["latest_message"] = log_message
                             append_pipeline_history(pipeline_status, log_message)
                     raise
+                _analyzed_one()
                 result_obj = result[0] if isinstance(result, tuple) else {}
                 is_success = (
                     isinstance(result_obj, dict)
@@ -7787,6 +7829,18 @@ class _PipelineMixin:
                     await self._raise_if_cancelled(
                         pipeline_status, pipeline_status_lock
                     )
+
+                # Per-document progress as data: a table-heavy document spends
+                # most of its time here, and the per-item log lines carry no
+                # counter for a progress bar to use.
+                analyzed_total += len(items)
+                doc_progress.publish(
+                    pipeline_status,
+                    doc_id,
+                    doc_progress.ANALYZE,
+                    analyzed_done,
+                    analyzed_total,
+                )
 
                 task_meta: dict[asyncio.Task, tuple[str, dict]] = {}
                 for item_id, item in items.items():

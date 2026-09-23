@@ -488,12 +488,22 @@ def create_nemo_query_routes(
         )
         prompt = f"{contexto}\n\n---\n\nPregunta: {request.query}"
 
-        # Se usa el LLM de la instancia por defecto: la configuración de
-        # modelos es común a todas las memorias, así que cualquiera daría el
-        # mismo, y la de por defecto siempre está abierta.
+        # El **rol `query`**, que es el que responde en el chat de una sola
+        # memoria: así esta redacción usa el modelo elegido, su nivel de
+        # razonamiento y su cola, y se apunta en la tabla de uso y coste.
+        #
+        # Antes se llamaba a `llm_model_func`, la función base, que no lleva
+        # nada de eso: con OpenAI colaba —el modelo va escrito dentro— pero
+        # con los conectores que lo leen de `hashing_kv` (Claude, Ollama,
+        # LoLLMs) llegaba vacío y respondía otro modelo, sin que nada lo
+        # dijera y sin contarse el gasto.
+        #
+        # La instancia es la de por defecto: la configuración de modelos es
+        # común a todas las memorias y esa siempre está abierta.
         base = await manager.get(registry.default_id)
         try:
-            answer = await base.llm_model_func(prompt, system_prompt=system_prompt)
+            responder = base.llm_role_func("query")
+            answer = await responder(prompt, system_prompt=system_prompt)
         except Exception as exc:
             logger.error("BIMNEMO: fallo redactando sobre varias NEMO: %s", exc)
             raise internal_server_error(exc)

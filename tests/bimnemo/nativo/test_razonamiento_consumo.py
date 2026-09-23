@@ -371,3 +371,72 @@ def test_cada_fila_tiene_su_papelera_y_pregunta_antes(aplicacion):
     boton.click()
     assert motor.borrados and motor.borrados[0].startswith("/bimnemo/usage?id=")
     assert "%7C" in motor.borrados[0]  # la clave va entera y escapada
+
+
+# -- la tabla es de la memoria abierta -----------------------------------------
+
+
+def test_pide_el_gasto_de_la_memoria_abierta(aplicacion):
+    """El `nemo` lo pone el motor; la tarjeta solo dice si quiere una o todas."""
+    from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
+
+    tarjeta = TarjetaConsumo(_Motor(USO))
+    assert tarjeta.motor.pedidos[-1] == "/bimnemo/usage?days=30&scope=nemo"
+
+
+def test_pulsar_todas_pide_la_cuenta_entera(aplicacion):
+    from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
+
+    tarjeta = TarjetaConsumo(_Motor(USO))
+    tarjeta._ver("all")
+    assert tarjeta.motor.pedidos[-1] == "/bimnemo/usage?days=30&scope=all"
+
+
+def test_cambiar_de_memoria_repinta_aunque_la_revision_no_cambie(aplicacion):
+    """La revisión es del registro entero: al cambiar de NEMO no se mueve."""
+    from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
+
+    de_una = dict(USO, nemo="obra-sur", nemo_name="Obra Sur", scope="nemo")
+    tarjeta = TarjetaConsumo(_Motor(de_una))
+    tarjeta.pintar(de_una)
+    assert tarjeta.tabla.rowCount() == 2
+
+    # Misma revisión, otra memoria y sin gasto: la tabla tiene que vaciarse.
+    otra = dict(
+        USO, rows=[], nemo="", nemo_name="General", scope="nemo", other_rows=2
+    )
+    tarjeta.pintar(otra)
+    assert tarjeta.tabla.rowCount() == 0
+    assert "General" in tarjeta.pista.text()
+
+
+def test_dice_cuanto_gasto_queda_fuera_del_filtro(aplicacion):
+    """Si no, la tabla parece incompleta sin que nada explique por qué."""
+    from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
+
+    datos = dict(USO, nemo_name="Obra Sur", scope="nemo", other_rows=3, revision=11)
+    tarjeta = TarjetaConsumo(_Motor(datos))
+    assert "Obra Sur" in tarjeta.pista.text()
+    assert "3 filas más" in tarjeta.pista.text() and "Todas" in tarjeta.pista.text()
+
+
+def test_sin_gasto_aqui_pero_si_en_otras_lo_dice(aplicacion):
+    from lightrag.api.bimnemo.nativo.consumo import TarjetaConsumo
+
+    tarjeta = TarjetaConsumo(
+        _Motor({"rows": [], "totals": {}, "revision": 0, "other_rows": 4})
+    )
+    assert "otras" in tarjeta.vacio.text() and "Todas" in tarjeta.vacio.text()
+
+
+def test_mirando_todas_cada_fila_dice_de_que_memoria_es(aplicacion):
+    from lightrag.api.bimnemo.nativo.consumo import ARCHIVO, TarjetaConsumo, memoria_de
+
+    filas = [
+        dict(USO["rows"][0], archivo="ley.pdf", nemo="obra-sur", nemo_name="Obra Sur"),
+        dict(USO["rows"][1], archivo="bases.docx", nemo=None),
+    ]
+    tarjeta = TarjetaConsumo(_Motor(dict(USO, rows=filas, scope="all", revision=31)))
+
+    assert "Obra Sur" in tarjeta.tabla.item(0, ARCHIVO).toolTip()
+    assert "antes de medirlas" in memoria_de(filas[1])

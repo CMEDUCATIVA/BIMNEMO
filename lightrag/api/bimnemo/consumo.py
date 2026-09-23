@@ -28,11 +28,20 @@ al pintar la tabla.
 
 ## Dónde se guarda
 
-``<working_dir>/bimnemo_consumo.json``, agregado por
-(fecha local, tipo, tarea, modelo). Es **global a todas las memorias**: lo que
-se paga es la cuenta del proveedor, no una memoria. Se escribe entero y de
-forma atómica en cada cambio; es un fichero pequeño (una fila por día y
-modelo), y así un cierre brusco nunca lo deja a medias.
+``<working_dir>/bimnemo_consumo.json``, agregado por (fecha local, memoria,
+tipo, tarea, modelo, archivo, nivel). Se escribe entero y de forma atómica en
+cada cambio; es un fichero pequeño (una fila por día y modelo), y así un
+cierre brusco nunca lo deja a medias.
+
+**Un solo fichero, con la memoria en cada fila.** La factura del proveedor es
+una, así que el registro no se parte por NEMO; pero saber cuánto cuesta cada
+memoria es justo lo que se pregunta quien tiene varias, y para eso cada fila
+apunta en cuál se gastó. La pantalla enseña por defecto la memoria abierta y
+puede pedir el total.
+
+Lo contado **antes** de esta versión no sabe de qué memoria era: se queda sin
+memoria apuntada y solo sale en la vista de todas. Adivinarla a posteriori
+sería inventarse la cuenta de una NEMO.
 """
 
 from __future__ import annotations
@@ -61,6 +70,18 @@ NOMBRE_FICHERO = "bimnemo_consumo.json"
 #: él, y las tareas que crea el documento heredan el suyo al crearse.
 DOCUMENTO: contextvars.ContextVar[str] = contextvars.ContextVar(
     "bimnemo_documento", default=""
+)
+
+#: La NEMO en la que se está gastando: su ``workspace``, que es su
+#: identificador (``nemo_registry``). ``""`` es la memoria heredada, que es
+#: una memoria de verdad y no «ninguna».
+#:
+#: Viaja igual que :data:`DOCUMENTO` y se pone en los mismos sitios: donde el
+#: motor tiene delante la instancia de esa memoria y puede leerle el
+#: ``workspace``. No puede salir de la petición HTTP, porque una indexación
+#: sigue corriendo mucho después de que la suya haya contestado.
+MEMORIA: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "bimnemo_memoria", default=None
 )
 
 #: El rol del motor → la tarea que entiende quien mira la tabla.
@@ -121,8 +142,13 @@ class _Registro:
         nivel: str = "",
         razonando: int = 0,
         inicio: Optional[datetime] = None,
+        nemo: Optional[str] = None,
     ) -> None:
         """Suma una llamada.
+
+        ``nemo`` es la memoria en la que se gastó (``""`` es la heredada).
+        ``None`` significa que no se supo —lo contado antes de medir por
+        memoria—, y se guarda como tal en vez de cargárselo a nadie.
 
         ``nivel`` es el razonamiento configurado para esa tarea al llamar
         («Apagado», «Alto», «Lo que decida el modelo»…); ``razonando``, los
@@ -139,13 +165,18 @@ class _Registro:
         p = precios.precio(tipo, modelo, host, momento)
         importe = precios.coste(p, entrada, salida)
         dia = momento.astimezone().date().isoformat()
-        clave = "|".join((dia, tipo, tarea, modelo, archivo, nivel))
+        # `?` para «no se supo», que no es lo mismo que la memoria heredada
+        # (``""``) y no puede compartir clave con ella.
+        clave = "|".join(
+            (dia, "?" if nemo is None else nemo, tipo, tarea, modelo, archivo, nivel)
+        )
 
         with self._cerrojo:
             fila = self._filas.setdefault(
                 clave,
                 {
                     "fecha": dia,
+                    "nemo": nemo,
                     "tipo": tipo,
                     "tarea": tarea,
                     "modelo": modelo,
@@ -205,16 +236,38 @@ class _Registro:
             self._guardar()
             return True
 
-    def resumen(self, dias: int = 30, hoy: Optional[date] = None) -> dict[str, Any]:
-        """Filas de los últimos ``dias`` y totales de hoy, 7 y 30 días."""
+    def resumen(
+        self,
+        dias: int = 30,
+        hoy: Optional[date] = None,
+        nemo: Optional[str] = None,
+        solo_de_una: bool = False,
+    ) -> dict[str, Any]:
+        """Filas de los últimos ``dias`` y totales de hoy, 7 y 30 días.
+
+        Con ``solo_de_una``, cuenta únicamente lo gastado en la memoria
+        ``nemo``; los totales también, porque un total que no cuadre con las
+        filas que se ven es peor que no darlo. Lo que queda fuera se cuenta
+        en ``other_rows``, para que la pantalla pueda decir que hay más.
+        """
         hoy = hoy or datetime.now().astimezone().date()
         desde = (hoy - timedelta(days=max(dias, 1) - 1)).isoformat()
         hace7 = (hoy - timedelta(days=6)).isoformat()
         hace30 = (hoy - timedelta(days=29)).isoformat()
         with self._cerrojo:
             # `id` es la clave del agregado: con ella se borra una fila.
-            filas = [dict(f, id=clave) for clave, f in self._filas.items()]
+            todas = [dict(f, id=clave) for clave, f in self._filas.items()]
             revision = self.revision
+
+        # Las filas de antes de medir por memoria no traen la clave: se
+        # quedan sin memoria (``None``) y solo salen en la vista de todas.
+        def es_de_la_memoria(fila: dict[str, Any]) -> bool:
+            return not solo_de_una or fila.get("nemo") == nemo
+
+        filas = [f for f in todas if es_de_la_memoria(f)]
+        fuera = sum(
+            1 for f in todas if f["fecha"] >= desde and not es_de_la_memoria(f)
+        )
 
         def suma(desde_dia: str) -> dict[str, Any]:
             elegidas = [f for f in filas if f["fecha"] >= desde_dia]
@@ -241,6 +294,7 @@ class _Registro:
             },
             "prices_checked": precios.COMPROBADO,
             "revision": revision,
+            "other_rows": fuera,
         }
 
 
@@ -260,6 +314,12 @@ class Contador:
         self.nivel = nivel
         # Se crea justo antes de llamar al proveedor: es el inicio de la llamada.
         self.inicio = datetime.now(timezone.utc)
+        # De quién es este gasto, leído **aquí** y no al apuntarlo: en una
+        # respuesta en streaming, el proveedor da las cuentas cuando el
+        # chorro termina, y para entonces quien las recibe ya está fuera del
+        # contexto de la memoria y del documento.
+        self.nemo = MEMORIA.get()
+        self.archivo = DOCUMENTO.get()
 
     def add_usage(self, cuentas: dict[str, Any]) -> None:
         try:
@@ -280,10 +340,11 @@ class Contador:
                 self.host,
                 entrada,
                 max(salida, 0),
-                archivo=DOCUMENTO.get(),
+                archivo=self.archivo,
                 nivel=self.nivel,
                 razonando=min(razonando, max(salida, 0)),
                 inicio=self.inicio,
+                nemo=self.nemo,
             )
         except Exception as exc:  # medir nunca rompe la llamada que se mide
             logger.warning("BIMNEMO: no se pudo contar el consumo: %s", exc)
@@ -338,14 +399,38 @@ def contador_embeddings(binding: str, modelo: str, host: str) -> Optional[Contad
     return Contador("embedding", TAREAS["embedding"], modelo, host)
 
 
-def instalar_marcador() -> None:
-    """Marca en :data:`DOCUMENTO` el archivo que procesa cada tarea.
+def _envolver_marcando(clase, nombre: str, ruta_de=None) -> None:
+    """Envuelve un método para que lo que gaste sepa de quién es.
 
-    Envuelve ``process_single_document`` —el que lleva un documento de la
-    extracción a la fusión— en vez de editar la tubería de LightRAG: es un
-    solo punto, no cambia nada de lo que hace, y deja el motor intacto. Se
-    instala una vez; llamarlo de nuevo no lo envuelve dos veces.
+    Pone :data:`MEMORIA` —del ``workspace`` de la instancia que recibe la
+    llamada— y, si se le da ``ruta_de``, también :data:`DOCUMENTO`. Se hace
+    envolviendo y no editando el motor: es un solo punto, no cambia nada de
+    lo que hace, y deja LightRAG intacto. Se instala una vez; llamarlo de
+    nuevo no envuelve dos veces.
     """
+    original = getattr(clase, nombre, None)
+    if original is None or getattr(original, "_bimnemo_marcado", False):
+        return
+
+    @functools.wraps(original)
+    async def marcado(self, *args, **kwargs):
+        testigos = [MEMORIA.set(str(getattr(self, "workspace", "") or ""))]
+        if ruta_de is not None:
+            ruta = ruta_de(kwargs)
+            testigos.append(DOCUMENTO.set(Path(ruta).name if ruta else ""))
+        try:
+            return await original(self, *args, **kwargs)
+        finally:
+            for testigo in reversed(testigos):
+                testigo.var.reset(testigo)
+
+    marcado._bimnemo_marcado = True
+    setattr(clase, nombre, marcado)
+
+
+def instalar_marcador() -> None:
+    """Marca de qué memoria y de qué archivo es cada llamada a la IA."""
+    from lightrag.lightrag import LightRAG
     from lightrag.pipeline import _PipelineMixin
 
     def ruta_proceso(kwargs: dict[str, Any]) -> str:
@@ -359,28 +444,14 @@ def instalar_marcador() -> None:
     # imágenes (``analyze_multimodal``, en su propio trabajador) y la
     # extracción y fusión (``process_single_document``). Sin la primera, lo
     # que cuesta analizar las tablas de un Word salía sin archivo.
-    for nombre, ruta_de in (
-        ("process_single_document", ruta_proceso),
-        ("analyze_multimodal", ruta_analisis),
-    ):
-        original = getattr(_PipelineMixin, nombre)
-        if getattr(original, "_bimnemo_marcado", False):
-            continue
+    _envolver_marcando(_PipelineMixin, "process_single_document", ruta_proceso)
+    _envolver_marcando(_PipelineMixin, "analyze_multimodal", ruta_analisis)
 
-        def envolver(original, ruta_de):
-            @functools.wraps(original)
-            async def marcado(self, *args, **kwargs):
-                ruta = ruta_de(kwargs)
-                testigo = DOCUMENTO.set(Path(ruta).name if ruta else "")
-                try:
-                    return await original(self, *args, **kwargs)
-                finally:
-                    DOCUMENTO.reset(testigo)
-
-            marcado._bimnemo_marcado = True
-            return marcado
-
-        setattr(_PipelineMixin, nombre, envolver(original, ruta_de))
+    # Preguntar también gasta, y no es de ningún archivo: solo de la memoria
+    # a la que se pregunta. Sin esto, el chat de una NEMO se apuntaría en la
+    # cuenta de otra —o en ninguna.
+    for consulta in ("aquery", "aquery_data", "aquery_llm"):
+        _envolver_marcando(LightRAG, consulta)
 
 
 def iniciar(carpeta: Path) -> None:
