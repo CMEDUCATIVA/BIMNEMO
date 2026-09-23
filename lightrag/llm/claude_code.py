@@ -199,12 +199,10 @@ async def claude_code_complete_if_cache(
             response_len = len(respuesta)
             prompt_tokens = max(1, prompt_len // 4)
             output_tokens = max(1, response_len // 4)
-            token_tracker.add_usage(
-                model=model or "claude-opus-5",
-                completion_tokens=output_tokens,
-                prompt_tokens=prompt_tokens,
-                cost=0.0,
-            )
+            token_tracker.add_usage({
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": output_tokens,
+            })
 
         return respuesta
 

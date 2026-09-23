@@ -74,7 +74,7 @@ TAREAS = {
 
 #: Bindings cuyo conector acepta ``token_tracker``. Pasárselo a otro sería un
 #: ``TypeError`` en la llamada, no un no-op (ver ``ollama.py``).
-CON_CONTADOR_LLM = frozenset({"openai", "gemini", "ollama", "bedrock"})
+CON_CONTADOR_LLM = frozenset({"openai", "gemini", "ollama", "bedrock", "claude_code"})
 CON_CONTADOR_EMBEDDING = frozenset({"openai", "gemini"})
 
 
