@@ -2370,6 +2370,30 @@ def create_app(args):
 
                 return role_gemini_complete
 
+            if role_binding == "claude_code":
+                from lightrag.llm.claude_code import claude_code_complete_if_cache
+
+                async def role_claude_code_complete(
+                    prompt,
+                    system_prompt=None,
+                    history_messages=None,
+                    **kwargs,
+                ) -> str:
+                    if history_messages is None:
+                        history_messages = []
+                    # La suscripción autentica por el login OAuth de Claude Code:
+                    # ni host ni clave de API aplican, aunque el .env los conserve
+                    # de un proveedor anterior.
+                    return await claude_code_complete_if_cache(
+                        role_model,
+                        prompt,
+                        system_prompt=system_prompt,
+                        history_messages=history_messages,
+                        **kwargs,
+                    )
+
+                return role_claude_code_complete
+
             from lightrag.llm.openai import openai_complete_if_cache
 
             async def role_openai_complete(

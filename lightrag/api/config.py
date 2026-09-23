@@ -87,6 +87,8 @@ def get_default_host(binding_type: str) -> str:
         # Let google-genai pick the correct default endpoint/version unless the
         # user explicitly overrides LLM_BINDING_HOST / EMBEDDING_BINDING_HOST.
         "gemini": os.getenv("LLM_BINDING_HOST", "DEFAULT_GEMINI_ENDPOINT"),
+        # Claude Code autentica por OAuth, no por host/clave. Devuelve vacío.
+        "claude_code": "",
     }
     return default_hosts.get(
         binding_type, os.getenv("LLM_BINDING_HOST", "http://localhost:11434")
@@ -585,6 +587,9 @@ def parse_args() -> argparse.Namespace:
         GeminiLLMOptions.add_args(parser)
     elif llm_binding_value == "bedrock":
         BedrockLLMOptions.add_args(parser)
+    elif llm_binding_value == "claude_code":
+        # Claude por suscripción: no necesita opciones CLI, el login OAuth autentica.
+        pass
 
     # Determine embedding binding value consistently from command line or environment
     embedding_binding_value = None

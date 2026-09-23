@@ -23,6 +23,8 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,11 @@ TIMEOUT_POR_DEFECTO = 300.0
 #: leer para razonar, pero no escribir ni ejecutar nada. Para una extracción o
 #: una respuesta es exactamente lo que se quiere.
 MODO_PERMISOS = "plan"
+
+#: Semáforo global: máximo 1 proceso Claude Code a la vez. Evita abrir 4
+#: ventanas del CLI simultáneamente cuando los roles (extract, keyword, query)
+#: se ejecutan en paralelo.
+_SEMAFORO_CLAUDE = asyncio.Semaphore(1)
 
 
 def _binario() -> str:
@@ -145,37 +152,61 @@ async def claude_code_complete_if_cache(
     if model:
         orden += ["--model", model]
 
-    try:
-        proceso = await asyncio.create_subprocess_exec(
-            *orden,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except FileNotFoundError:
-        raise RuntimeError(
-            "No se encontró el binario de Claude Code. Descárgalo e inicia "
-            "sesión en Configuración IA (Claude → por suscripción)."
-        ) from None
-    except OSError as exc:
-        raise RuntimeError(f"No se pudo ejecutar Claude Code: {exc}") from exc
+    async with _SEMAFORO_CLAUDE:
+        # En Windows, oculta la ventana de CLI para no molestar al usuario.
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW
 
-    try:
-        salida, error = await asyncio.wait_for(proceso.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
         try:
-            proceso.kill()
-        except OSError:
-            pass
-        raise RuntimeError("Claude Code tardó demasiado en responder.") from None
+            proceso = await asyncio.create_subprocess_exec(
+                *orden,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=creationflags,
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                "No se encontró el binario de Claude Code. Descárgalo e inicia "
+                "sesión en Configuración IA (Claude → por suscripción)."
+            ) from None
+        except OSError as exc:
+            raise RuntimeError(f"No se pudo ejecutar Claude Code: {exc}") from exc
 
-    if proceso.returncode != 0:
-        detalle = (error or salida).decode("utf-8", errors="replace").strip()
-        raise RuntimeError(
-            f"Claude Code terminó con error ({proceso.returncode}): "
-            f"{detalle[:500] or 'sin detalle'}"
-        )
+        try:
+            salida, error = await asyncio.wait_for(proceso.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            try:
+                proceso.kill()
+            except OSError:
+                pass
+            raise RuntimeError("Claude Code tardó demasiado en responder.") from None
 
-    return salida.decode("utf-8", errors="replace").strip()
+        if proceso.returncode != 0:
+            detalle = (error or salida).decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"Claude Code terminó con error ({proceso.returncode}): "
+                f"{detalle[:500] or 'sin detalle'}"
+            )
+
+        respuesta = salida.decode("utf-8", errors="replace").strip()
+
+        # Rastrear tokens: Claude Code no devuelve uso real, así que estimamos
+        # contando caracteres (~4 chars = 1 token). En futuras versiones si
+        # Claude Code exporta usage, se actualiza aquí.
+        if token_tracker:
+            prompt_len = len(texto)
+            response_len = len(respuesta)
+            prompt_tokens = max(1, prompt_len // 4)
+            output_tokens = max(1, response_len // 4)
+            token_tracker.add_usage(
+                model=model or "claude-opus-5",
+                completion_tokens=output_tokens,
+                prompt_tokens=prompt_tokens,
+                cost=0.0,
+            )
+
+        return respuesta
 
 
 async def claude_code_complete(
