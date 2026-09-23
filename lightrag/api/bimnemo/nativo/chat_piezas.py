@@ -105,9 +105,23 @@ class Barra(QFrame):
         fila.addWidget(etiqueta)
         fila.addWidget(control)
 
-    def poner_memorias(self, memorias: list[dict[str, Any]]) -> None:
-        """Rellena «Buscar en» conservando lo que hubiera elegido."""
+    def poner_memorias(
+        self, memorias: list[dict[str, Any]], activa: Optional[str] = None
+    ) -> None:
+        """Rellena «Buscar en» conservando lo que hubiera elegido.
+
+        ``activa`` es la memoria abierta en la barra de arriba, y solo se usa
+        **la primera vez**, cuando todavía no hay nada elegido: es lo que
+        contesta a «¿en qué estoy trabajando?». Después manda lo que haya
+        elegido la persona, que para eso está el selector.
+        """
+        # «Primera vez» es que solo esté el «Todas las memorias» de salida:
+        # el selector nace con él, así que `currentData()` nunca es nulo y no
+        # sirve para saber si alguien ha elegido algo.
+        primera_vez = self.memoria.count() <= 1
         elegida = self.memoria.currentData()
+        if primera_vez and activa is not None:
+            elegida = activa
         self.memoria.blockSignals(True)
         self.memoria.clear()
         self.memoria.addItem("Todas las memorias", TODAS)
@@ -119,6 +133,16 @@ class Barra(QFrame):
         if indice >= 0:
             self.memoria.setCurrentIndex(indice)
         self.memoria.blockSignals(False)
+
+    def elegir_memoria(self, nemo: str) -> bool:
+        """Deja «Buscar en» en esa memoria. Devuelve si estaba en la lista."""
+        indice = self.memoria.findData(nemo)
+        if indice < 0:
+            return False
+        self.memoria.blockSignals(True)
+        self.memoria.setCurrentIndex(indice)
+        self.memoria.blockSignals(False)
+        return True
 
     # -- lo que se ha elegido ----------------------------------------------
 

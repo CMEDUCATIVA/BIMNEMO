@@ -125,7 +125,23 @@ class PantallaChat(QWidget):
 
     def _poner_memorias(self, datos: Any) -> None:
         if isinstance(datos, dict):
-            self.barra.poner_memorias(datos.get("nemos") or [])
+            # La memoria abierta en la barra de arriba es la que se propone.
+            self.barra.poner_memorias(datos.get("nemos") or [], self.motor.memoria)
+
+    def poner_memoria(self, _nombre: str) -> None:
+        """Se cambió de memoria arriba: el chat va detrás.
+
+        Lo llama la ventana, como a las demás pantallas. Antes el chat no
+        tenía este método y se quedaba en «Todas las memorias», que es lo
+        primero de la lista: preguntabas con una memoria abierta y te
+        contestaba mezclando las tres, tardando el triple.
+
+        El identificador se toma del motor y no del nombre que llega, porque
+        el selector guarda identificadores y dos memorias pueden llamarse
+        parecido. Si todavía no está en la lista, se vuelve a pedir.
+        """
+        if not self.barra.elegir_memoria(self.motor.memoria):
+            self.motor.get("/bimnemo/nemos", self._poner_memorias, None)
 
     def limpiar(self) -> None:
         """Vacía la conversación y deja el cartel de bienvenida."""
