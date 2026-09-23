@@ -1617,6 +1617,7 @@ def create_app(args):
         "azure_openai",
         "bedrock",
         "gemini",
+        "claude_code",
     ]:
         raise Exception("llm binding not supported")
 
