@@ -12,6 +12,19 @@ import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def sin_sesion_viva(monkeypatch):
+    """Estas pruebas son del camino de siempre: un proceso por llamada.
+
+    La sesión reutilizada tiene las suyas (`tests/bimnemo/test_claude_sesion`).
+    Mezclarlas aquí haría que cada prueba recorriera los dos caminos y no se
+    supiera cuál está comprobando.
+    """
+    from lightrag.llm import claude_sesion
+
+    monkeypatch.setenv(claude_sesion.INTERRUPTOR, "0")
+
+
 @pytest.mark.asyncio
 async def test_claude_code_no_window_win32():
     """Verifica que en Windows se usa CREATE_NO_WINDOW."""

@@ -83,6 +83,7 @@ CONFIGURABLE_ENV_KEYS: frozenset[str] = frozenset(
                 "OPENAI_LLM_EXTRA_BODY",
                 "GEMINI_LLM_THINKING_CONFIG",
                 "OLLAMA_LLM_THINK",
+                "CLAUDE_CODE_LLM_EFFORT",
             )
         ),
     }

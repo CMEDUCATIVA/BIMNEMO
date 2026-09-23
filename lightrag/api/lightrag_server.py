@@ -1716,6 +1716,16 @@ def create_app(args):
             # by the very next line, which is its owner.
             await nemo_manager.close_all()
 
+            # BIMNEMO: the reused Claude Code sessions are child processes of
+            # this one, and the binary is 237 MB resident. Leaving one behind
+            # on every restart would add up fast.
+            try:
+                from lightrag.llm import claude_sesion
+
+                await claude_sesion.cerrar_todas()
+            except Exception as exc:  # noqa: BLE001 - shutdown never fails here
+                logger.debug("BIMNEMO: could not close Claude sessions: %s", exc)
+
             # Clean up database connections
             await rag.finalize_storages()
 
@@ -2139,6 +2149,16 @@ def create_app(args):
                 role_provider_options = GeminiLLMOptions.options_dict_for_role(
                     args, role, is_cross_provider
                 )
+            elif role_binding == "claude_code":
+                # BIMNEMO: Claude Code is a CLI, not an API, so it has no
+                # binding-options class to read from. Its one knob is
+                # `--effort`, and it is read here by the same
+                # `{ROLE}_{BINDING}_{FIELD}` convention the others follow, so
+                # the settings screen writes it exactly like the rest.
+                esfuerzo = os.environ.get(
+                    f"{role.upper()}_CLAUDE_CODE_LLM_EFFORT", ""
+                ).strip()
+                role_provider_options = {"effort": esfuerzo} if esfuerzo else {}
             elif role_binding in ["lollms", "ollama"]:
                 from lightrag.llm.binding_options import OllamaLLMOptions
 
@@ -2384,6 +2404,8 @@ def create_app(args):
                     # La suscripción autentica por el login OAuth de Claude Code:
                     # ni host ni clave de API aplican, aunque el .env los conserve
                     # de un proveedor anterior.
+                    if role_provider_options:
+                        kwargs = {**role_provider_options, **kwargs}
                     return await claude_code_complete_if_cache(
                         role_model,
                         prompt,

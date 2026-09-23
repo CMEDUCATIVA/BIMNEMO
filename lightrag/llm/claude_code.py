@@ -35,6 +35,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from lightrag.llm import claude_sesion
 from lightrag.utils import logger
 
 #: Plazo por defecto de una llamada. Claude Code arranca un proceso por cada
@@ -117,6 +118,23 @@ def _armar_prompt(
     return "\n\n".join(partes)
 
 
+def _contar(token_tracker: Any | None, texto: str, respuesta: str) -> None:
+    """Apunta el gasto estimado de una llamada.
+
+    Claude Code no devuelve el uso real, así que se estima contando
+    caracteres (~4 por token). El modelo y el precio no viajan aquí: los
+    pone el contador de BIMNEMO, que ya sabe con qué modelo se creó.
+    """
+    if not token_tracker:
+        return
+    token_tracker.add_usage(
+        {
+            "prompt_tokens": max(1, len(texto) // 4),
+            "completion_tokens": max(1, len(respuesta) // 4),
+        }
+    )
+
+
 async def claude_code_complete_if_cache(
     model: str,
     prompt: str,
@@ -137,11 +155,29 @@ async def claude_code_complete_if_cache(
     """
     kwargs.pop("hashing_kv", None)
     timeout = kwargs.pop("timeout", None) or TIMEOUT_POR_DEFECTO
+    # Cuánto se le deja pensar. Llega desde la barra de razonamiento por la
+    # misma convención que el resto de proveedores ({ROL}_{BINDING}_{CAMPO}).
+    # Vacío es «lo que decida el modelo»: no se le pasa nada.
+    esfuerzo = str(kwargs.pop("effort", "") or "").strip()
     if enable_cot:
         logger.debug("claude_code: enable_cot=True se ignora (no es una API).")
 
     binario = _binario()
     texto = _armar_prompt(prompt, system_prompt, history_messages)
+
+    # Primero, la sesión viva: reutiliza el proceso y se ahorra los ~3 s que
+    # cuesta preparar la sesión cada vez (ver `claude_sesion`). Si falla por
+    # lo que sea, ella ya se ha matado sola y aquí se sigue por el camino de
+    # abajo, que es el de siempre y no depende de nada de esto.
+    if claude_sesion.activada():
+        try:
+            respuesta = await claude_sesion.sesion(
+                binario, model, esfuerzo
+            ).preguntar(texto, timeout)
+            _contar(token_tracker, texto, respuesta)
+            return respuesta
+        except Exception as exc:  # noqa: BLE001 - se reintenta a la antigua
+            logger.debug("claude_code: sin sesión viva, proceso suelto (%s)", exc)
 
     # El prompt va por la ENTRADA ESTÁNDAR, no como argumento.
     #
@@ -167,6 +203,8 @@ async def claude_code_complete_if_cache(
     ]
     if model:
         orden += ["--model", model]
+    if esfuerzo:
+        orden += ["--effort", esfuerzo]
 
     async with _SEMAFORO_CLAUDE:
         # En Windows, oculta la ventana de CLI para no molestar al usuario.
@@ -219,19 +257,7 @@ async def claude_code_complete_if_cache(
 
         respuesta = salida.decode("utf-8", errors="replace").strip()
 
-        # Rastrear tokens: Claude Code no devuelve uso real, así que estimamos
-        # contando caracteres (~4 chars = 1 token). En futuras versiones si
-        # Claude Code exporta usage, se actualiza aquí.
-        if token_tracker:
-            prompt_len = len(texto)
-            response_len = len(respuesta)
-            prompt_tokens = max(1, prompt_len // 4)
-            output_tokens = max(1, response_len // 4)
-            token_tracker.add_usage({
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": output_tokens,
-            })
-
+        _contar(token_tracker, texto, respuesta)
         return respuesta
 
 

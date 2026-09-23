@@ -46,7 +46,9 @@ EFFORT = "OPENAI_LLM_REASONING_EFFORT"
 EXTRA_BODY = "OPENAI_LLM_EXTRA_BODY"
 GEMINI = "GEMINI_LLM_THINKING_CONFIG"
 OLLAMA = "OLLAMA_LLM_THINK"
-BASES = (EFFORT, EXTRA_BODY, GEMINI, OLLAMA)
+#: Claude por suscripción. No es una API: el CLI lo controla con `--effort`.
+CLAUDE = "CLAUDE_CODE_LLM_EFFORT"
+BASES = (EFFORT, EXTRA_BODY, GEMINI, OLLAMA, CLAUDE)
 
 #: Cada barra y los roles del motor que gobierna.
 BARRAS = {
@@ -189,6 +191,31 @@ _GEMINI_3 = _gemini_nivel(
     nota="Este modelo no deja apagar el razonamiento; lo mínimo es «Bajo».",
 )
 
+#: Claude por suscripción, vía `claude --effort`. El CLI admite low,
+#: medium, high, xhigh y max; **no hay «apagado»**, así que lo mínimo es
+#: «Bajo». Comprobado en `claude --help` del CLI 2.1.280.
+#:
+#: Esto es lo que la API de Anthropic NO deja hacer por su capa compatible
+#: con OpenAI —que ignora `reasoning_effort` sin avisar—, y por eso el
+#: proveedor «Anthropic (Claude)» por clave sigue sin barra y este sí la
+#: tiene. No es una incoherencia: son dos caminos distintos al mismo modelo.
+_CLAUDE_CODE = Esquema(
+    (
+        _defecto(),
+        *(
+            Nivel(v, r, {CLAUDE: v})
+            for v, r in (
+                ("low", BAJO),
+                ("medium", MEDIO),
+                ("high", ALTO),
+                ("xhigh", MUY_ALTO),
+                ("max", "Máximo"),
+            )
+        ),
+    ),
+    "Claude Code no deja apagar el razonamiento; lo mínimo es «Bajo».",
+)
+
 _OLLAMA_SI_NO = Esquema(
     (
         _defecto(),
@@ -247,6 +274,8 @@ def esquema(proveedor: str, modelo: str) -> Optional[Esquema]:
         return _GLM if m.startswith(("glm-4.5", "glm-4.6", "glm-4.7")) else None
     if proveedor == "openrouter":
         return _OPENROUTER
+    if proveedor == "claude_suscripcion":
+        return _CLAUDE_CODE if base.startswith("claude-") else None
     if proveedor == "gemini":
         if m in ("gemini-2.5-flash", "gemini-2.5-flash-lite"):
             return _GEMINI_25_FLASH
@@ -368,6 +397,7 @@ _CAMPO = {
     EXTRA_BODY: "extra_body",
     GEMINI: "thinking_config",
     OLLAMA: "think",
+    CLAUDE: "effort",
 }
 
 #: Rótulos para la tabla de consumo cuando no hay un nivel de la barra.

@@ -213,9 +213,9 @@ LLM_PROVIDERS: tuple[Provider, ...] = (
             key_url="https://claude.com/login",
             note=(
                 "Usa tu suscripción de Claude Pro/Max con el login de Claude "
-                "Code. Cada llamada ejecuta el binario de Claude Code, así que "
-                "es más lenta que la API; para indexar conviene un modelo "
-                "barato como claude-haiku-4-5."
+                "Code. Va por el programa de Claude Code, no por la API: algo "
+                "más lenta, pero sin coste por token y con control de "
+                "razonamiento, que la capa de API de Anthropic no ofrece."
             ),
             host_used=False,
         ),

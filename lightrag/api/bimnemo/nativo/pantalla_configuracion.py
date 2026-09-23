@@ -221,19 +221,43 @@ class Seccion(QWidget):
             CLAVE_PUESTA if self._tenia_clave else "Pega aquí tu clave"
         )
         self.api_key.clear()
-        self._pintar_pista()
 
-        if self.razonamiento is not None:
-            self._razonamiento_guardado = dict(valores)
-            self._poner_razonamiento(valores.get("reasoning") or {})
-
+        # El acceso, ANTES que la pista y el razonamiento: los niveles dependen de él
+        # —por clave y por suscripción no se llega al modelo por el mismo
+        # sitio, ni admiten lo mismo—, así que calcularlos antes de saber
+        # cuál está elegido los saca del sitio equivocado.
         if self.modo is not None:
             modo = valores.get("mode") or "api"
             indice = self.modo.findData(modo)
             self.modo.blockSignals(True)
             self.modo.setCurrentIndex(indice if indice >= 0 else 0)
             self.modo.blockSignals(False)
+
+        self._pintar_pista()
+
+        if self.razonamiento is not None:
+            self._razonamiento_guardado = dict(valores)
+            self._poner_razonamiento(valores.get("reasoning") or {})
+
         self._aplicar_modo()
+
+    def _entrada_activa(self) -> dict[str, Any]:
+        """La entrada del catálogo de la que se habla ahora mismo.
+
+        **Con «Por suscripción», la de la suscripción y no la del proveedor.**
+        Son dos caminos distintos al mismo modelo y no dicen lo mismo: Claude
+        por clave va por la capa compatible con OpenAI —que ignora
+        `reasoning_effort` sin avisar y sí necesita clave— y Claude por
+        suscripción va por su CLI, que tiene `--effort` y no pide ninguna.
+
+        De aquí salen los niveles de razonamiento **y** la pista de debajo.
+        Mirar el sitio equivocado deja sin barra a quien la tiene, o le pide
+        una clave a quien no la necesita.
+        """
+        elegido = self._elegido() or {}
+        if self._es_suscripcion():
+            return elegido.get("subscription") or elegido
+        return elegido
 
     def _poner_razonamiento(self, elegidos: dict[str, str]) -> None:
         """Los niveles del modelo marcado y, encima, lo que había elegido.
@@ -244,7 +268,7 @@ class Seccion(QWidget):
         if self.razonamiento is None:
             return
         modelo = self.modelo_actual()
-        info = ((self._elegido() or {}).get("reasoning") or {}).get(modelo)
+        info = (self._entrada_activa().get("reasoning") or {}).get(modelo)
         guardado = self._razonamiento_guardado
         if info is None and modelo == guardado.get("model"):
             info = guardado.get("reasoning_levels")
@@ -337,7 +361,7 @@ class Seccion(QWidget):
             self._poner_razonamiento({})
 
     def _pintar_pista(self) -> None:
-        elegido = self._elegido() or {}
+        elegido = self._entrada_activa()
         partes = [t for t in (elegido.get("key_hint"), elegido.get("note")) if t]
         if elegido.get("key_url"):
             partes.append(f"Claves: {elegido['key_url']}")
@@ -377,7 +401,13 @@ class Seccion(QWidget):
                 self._suscripcion.refrescar()
 
     def _cambio_modo(self) -> None:
+        # Pasar de clave a suscripción cambia el camino al modelo, y con él
+        # lo que admite: los niveles se recalculan.
         self._aplicar_modo()
+        self._pintar_pista()
+        self._poner_razonamiento(
+            self.razonamiento.elegidos() if self.razonamiento else {}
+        )
 
     # -- guardado -----------------------------------------------------------
 
